@@ -11,12 +11,10 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Install dependencies first for better layer caching.
+# Project metadata + source, then install (with the MCP extra so /mcp works).
 COPY pyproject.toml README.md ./
-RUN pip install --no-cache-dir .
-
-# Then the application code.
 COPY caldera ./caldera
+RUN pip install --no-cache-dir '.[mcp]'
 
 # Vault working tree (clone target / mount point).
 RUN mkdir -p /vault

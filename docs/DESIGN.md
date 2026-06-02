@@ -766,7 +766,7 @@ Search adds a few more knobs (`CALDERA_SEMANTIC_FALLBACK`, `CALDERA_EMBEDDING_DI
   and notes as `caldera://note/{path}` resources. Implementation pending.
 - **Deployment** — GitHub Actions builds/pushes the image to GHCR; deployed to a
   homelab k8s cluster as a single-replica Deployment (single git working tree ⇒
-  single writer). Full treatment in a forthcoming `docs/DEPLOYMENT.md`.
+  single writer). Full treatment in [`docs/DEPLOYMENT.md`](DEPLOYMENT.md).
 - Additional sources: local bind-mount, S3, Git-over-SSH, GitLab.
 - **Search** — designed in [`SEARCH.md`](SEARCH.md): fuzzy keyword (rapidfuzz,
   default), opt-in local semantic/vector search (fastembed + sqlite-vec, private

@@ -223,8 +223,8 @@ degrades to a pull and reports that push was skipped.
 
 ## 9. Deployment (GitHub Actions → homelab k8s)
 
-This shapes a few MCP decisions and gets a fuller treatment in a forthcoming
-`docs/DEPLOYMENT.md`; the MCP-relevant points:
+This shapes a few MCP decisions and gets a fuller treatment in
+[`docs/DEPLOYMENT.md`](DEPLOYMENT.md); the MCP-relevant points:
 
 - **One image, one Deployment.** REST + MCP + sync in a single container keeps
   the working tree, index, and write-lock in one process. The image is built and

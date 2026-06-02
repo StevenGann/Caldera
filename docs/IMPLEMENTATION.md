@@ -17,7 +17,7 @@
 | **3. Fuzzy search** | rapidfuzz scorer, `?mode=`, `/search/status` | ✅ keyword done (semantic → P5) |
 | **4. MCP server** | Streamable HTTP mount, tools/resources, Bearer middleware | ✅ done (semantic tool → P5) |
 | **5. Semantic search** | fastembed + sqlite-vec, opt-in | ⬜ |
-| **6. Deployment** | Dockerfile, k8s manifests, GitHub Actions → GHCR, `DEPLOYMENT.md` | ⬜ |
+| **6. Deployment** | Dockerfile, k8s manifests, GitHub Actions → GHCR, `DEPLOYMENT.md` | ✅ done |
 
 ## Open findings → resolution (from design review)
 
@@ -45,7 +45,8 @@
 - [ ] **M2 / m2** Recovery-ref durability: retain-until-pushed retry on later cycles; GC/retention policy. *(partial: `recovery_ref_pushed` captured)*
 - [ ] **M4** Crash mid multi-file move: atomic batch or boot journal; no commit-then-push of a half-rewrite.
 - [ ] **m5** `resources/list_changed` fires only on path-set change; suppress Caldera's own bot commits → Phase 4 (MCP).
-- [ ] **m7 / m17** Auto-merge corruption surfaced (`last_auto_merge`); `DEPLOYMENT.md` stub; second-PVC decision.
+- [x] **m17** `docs/DEPLOYMENT.md` written; `deploy/k8s/` manifests (replicas:1, Recreate, two PVCs, ingress no-buffer); Dockerfile fixed + `[mcp]` extra.
+- [ ] **m7** Auto-merge corruption surfaced (`last_auto_merge`).
 - [ ] **m13** Open-when-empty auth → opt-in `CALDERA_ALLOW_NO_AUTH`; key-entropy min; single-writer guard.
 
 ### Phase 3 (search) — keyword done ✅ (`core/search.py`, `api/search.py`; `test_search.py`)

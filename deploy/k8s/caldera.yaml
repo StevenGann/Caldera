@@ -1,0 +1,124 @@
+# Caldera — single-instance deployment for a homelab cluster.
+#
+# IMPORTANT: replicas is 1 and strategy is Recreate, by design. Each pod holds
+# its own git working tree; two writers would diverge (DESIGN §7, MCP.md §9).
+# Do not scale this up.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: caldera
+---
+# Vault working tree (the cloned git repo). Survives restarts so a reboot
+# re-opens the clone instead of re-cloning.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: caldera-vault
+  namespace: caldera
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+# Caldera state OUTSIDE the vault (embeddings/vectors.db, etc.) — never committed
+# to git (SEARCH.md §3.3). Separate PVC from the vault.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: caldera-data
+  namespace: caldera
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: caldera
+  namespace: caldera
+  labels: { app: caldera }
+spec:
+  replicas: 1                 # single writer — do not increase (see header)
+  strategy:
+    type: Recreate            # never two pods on the same vault at once
+  selector:
+    matchLabels: { app: caldera }
+  template:
+    metadata:
+      labels: { app: caldera }
+    spec:
+      terminationGracePeriodSeconds: 60   # must exceed the flush+push budget (§7.2.2)
+      containers:
+        - name: caldera
+          image: ghcr.io/OWNER/caldera:edge   # set by your release pipeline
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8000 }
+          envFrom:
+            - secretRef: { name: caldera-secrets }
+          env:
+            - { name: CALDERA_SOURCE, value: "github" }
+            - { name: CALDERA_GITHUB_REPO, value: "owner/your-vault" }
+            - { name: CALDERA_GITHUB_BRANCH, value: "main" }
+            - { name: CALDERA_VAULT_PATH, value: "/vault" }
+            - { name: CALDERA_DATA_PATH, value: "/data" }
+            - { name: CALDERA_READ_ONLY, value: "false" }
+            - { name: CALDERA_SYNC_INTERVAL, value: "60" }
+            - { name: CALDERA_COMMIT_DEBOUNCE, value: "10" }
+            - { name: CALDERA_COMMIT_MAX_WAIT, value: "30" }
+          volumeMounts:
+            - { name: vault, mountPath: /vault }
+            - { name: data, mountPath: /data }
+          readinessProbe:                # ready once the vault is cloned + indexed
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 60         # allow time for a large first clone
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "1", memory: "1Gi" }   # bump memory if semantic search is on
+      volumes:
+        - name: vault
+          persistentVolumeClaim: { claimName: caldera-vault }
+        - name: data
+          persistentVolumeClaim: { claimName: caldera-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: caldera
+  namespace: caldera
+spec:
+  selector: { app: caldera }
+  ports:
+    - { name: http, port: 80, targetPort: http }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: caldera
+  namespace: caldera
+  annotations:
+    # Streamable HTTP (/mcp) needs unbuffered responses and a generous idle
+    # timeout — adjust for your ingress controller (nginx shown).
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+spec:
+  rules:
+    - host: caldera.your-homelab.example
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: caldera
+                port: { number: 80 }
