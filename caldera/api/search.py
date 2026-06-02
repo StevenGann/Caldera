@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from ..config import Settings, get_settings
+from ..core.search import keyword_search
 from ..core.vault import Vault
 from ..dependencies import get_vault, require_api_key
 from ..models import NoteStub
@@ -16,7 +18,16 @@ class SearchHit(BaseModel):
     path: str
     name: str
     snippet: str
-    score: int
+    score: float
+    match_type: str  # name | heading | body | tag | semantic | hybrid
+
+
+class SearchStatus(BaseModel):
+    keyword: str = "ready"
+    semantic_enabled: bool = False
+    state: str = "disabled"  # disabled | warming | ready | error
+    model: str | None = None
+    vectors: int = 0
 
 
 class TagCount(BaseModel):
@@ -39,43 +50,46 @@ class Graph(BaseModel):
     edges: list[GraphEdge]
 
 
-def _snippet(body: str, needle: str, width: int = 120) -> str:
-    idx = body.lower().find(needle.lower())
-    if idx < 0:
-        return body[:width].strip()
-    start = max(0, idx - width // 2)
-    return ("…" if start else "") + body[start : start + width].strip() + "…"
-
-
 @router.get("/search", response_model=list[SearchHit])
 def search(
     q: str = Query(..., min_length=1),
+    mode: str = Query("keyword", pattern="^(keyword|semantic|hybrid)$"),
     tag: str | None = Query(None),
     folder: str | None = Query(None),
+    threshold: float | None = Query(None, ge=0, le=100),
     limit: int = Query(50, ge=1, le=500),
     vault: Vault = Depends(get_vault),
+    settings: Settings = Depends(get_settings),
 ) -> list[SearchHit]:
+    if mode in ("semantic", "hybrid"):
+        # Semantic search (SEARCH.md Tier 2) is not built yet. Per RFC 9110,
+        # a configured-off feature is 409, not 501 (review m8).
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "semantic_disabled",
+                "message": f"mode={mode} requires semantic search, which is not enabled",
+            },
+        )
     candidates = vault.list_notes(folder=folder, tag=tag)
-    ql = q.lower()
-    hits: list[SearchHit] = []
-    for path in candidates:
-        entry = vault.index.get(path)
-        if not entry:
-            continue
-        body = entry.parsed.content
-        count = body.lower().count(ql)
-        name_hit = ql in entry.name.lower()
-        if count or name_hit:
-            hits.append(
-                SearchHit(
-                    path=entry.path,
-                    name=entry.name,
-                    snippet=_snippet(body, q),
-                    score=count + (5 if name_hit else 0),
-                )
-            )
-    hits.sort(key=lambda h: h.score, reverse=True)
-    return hits[:limit]
+    hits = keyword_search(
+        vault.index,
+        q,
+        candidates=candidates,
+        limit=limit,
+        threshold=threshold if threshold is not None else settings.search_fuzzy_threshold,
+    )
+    return [
+        SearchHit(path=h.path, name=h.name, snippet=h.snippet, score=h.score,
+                  match_type=h.match_type)
+        for h in hits
+    ]
+
+
+@router.get("/search/status", response_model=SearchStatus)
+def search_status(settings: Settings = Depends(get_settings)) -> SearchStatus:
+    # Semantic tier is not built yet; report keyword-only.
+    return SearchStatus(keyword="ready", semantic_enabled=False, state="disabled")
 
 
 @router.get("/tags", response_model=list[TagCount])

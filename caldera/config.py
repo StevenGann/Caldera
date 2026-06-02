@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     api_keys: Annotated[list[str], NoDecode] = Field(default_factory=list)
     read_only: bool = False
     max_note_bytes: int = 5 * 1024 * 1024
+    search_fuzzy_threshold: float = 60.0  # min keyword-search score 0–100 (SEARCH.md §7)
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "info"

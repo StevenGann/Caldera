@@ -163,3 +163,37 @@ def test_note_size_ceiling(tmp_path, monkeypatch):
         r = c.post("/api/v1/notes", json={"path": "Big.md", "content": "x" * 200})
         assert r.status_code == 413
         assert r.json()["error"]["code"] == "note_too_large"
+
+
+def test_search_is_fuzzy_and_ranked(client):
+    r = client.get("/api/v1/search", params={"q": "calderra"})  # typo
+    assert r.status_code == 200
+    hits = r.json()
+    assert hits and hits[0]["path"] == "Caldera/Caldera.md"
+    assert "match_type" in hits[0] and isinstance(hits[0]["score"], (int, float))
+
+
+def test_search_semantic_mode_disabled_returns_409(client):
+    r = client.get("/api/v1/search", params={"q": "anything", "mode": "semantic"})
+    assert r.status_code == 409
+    assert r.json()["error"]["code"] == "semantic_disabled"
+
+
+def test_search_status_reports_keyword_only(client):
+    r = client.get("/api/v1/search/status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["keyword"] == "ready" and body["semantic_enabled"] is False
+
+
+def test_error_envelope_is_consistent_across_error_kinds(client):
+    # Auth error (401), validation error (422), and not-found (404) all use the
+    # {error:{code,message,detail}} envelope (review m11).
+    r = client.get("/api/v1/notes", headers={"Authorization": ""})
+    assert r.status_code == 401 and r.json()["error"]["code"] == "unauthorized"
+
+    r = client.get("/api/v1/search")  # missing required ?q=
+    assert r.status_code == 422 and r.json()["error"]["code"] == "validation_error"
+
+    r = client.get("/api/v1/notes/Nope.md")
+    assert r.status_code == 404 and r.json()["error"]["code"] == "not_found"

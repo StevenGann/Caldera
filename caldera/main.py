@@ -7,7 +7,10 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__
 from .api import health, notes, search, vault as vault_api
@@ -29,6 +32,14 @@ _ERROR_MAP: dict[type[Exception], tuple[int, str]] = {
     vault_core.NoteTooLarge: (413, "note_too_large"),
     vault_core.ReadOnly: (403, "read_only"),
     vault_core.InvalidPath: (400, "invalid_path"),
+}
+
+# Status-derived codes for framework HTTP errors lacking a structured detail.
+_STATUS_CODE: dict[int, str] = {
+    400: "bad_request", 401: "unauthorized", 403: "forbidden", 404: "not_found",
+    405: "method_not_allowed", 409: "conflict", 412: "precondition_failed",
+    413: "note_too_large", 422: "validation_error", 500: "internal_error",
+    503: "unavailable",
 }
 
 
@@ -99,6 +110,41 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=http_status,
             content={"error": {"code": code, "message": str(exc), "detail": None}},
+        )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _http_error_handler(request: Request, exc: StarletteHTTPException):
+        # Normalize every HTTP error into the {error:{code,message,detail}}
+        # envelope (review m11). Endpoints that raise a {code,message} detail keep
+        # their code; framework errors get a status-derived code.
+        detail = exc.detail
+        if isinstance(detail, dict) and "code" in detail:
+            body = {
+                "code": detail.get("code"),
+                "message": detail.get("message"),
+                "detail": detail.get("detail"),
+            }
+        else:
+            body = {
+                "code": _STATUS_CODE.get(exc.status_code, "error"),
+                "message": detail if isinstance(detail, str) else None,
+                "detail": None,
+            }
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": body},
+            headers=getattr(exc, "headers", None),
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error_handler(request: Request, exc: RequestValidationError):
+        return JSONResponse(
+            status_code=422,
+            content={"error": {
+                "code": "validation_error",
+                "message": "request validation failed",
+                "detail": jsonable_encoder(exc.errors()),
+            }},
         )
 
     app.include_router(health.router)

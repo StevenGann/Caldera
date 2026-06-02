@@ -300,8 +300,8 @@ safety-sensitive gaps.
 |--------|------|--------|-------------|
 | `GET` | `/notes/{path}/links` | built | Outgoing links only (subset of the note resource). Nested route (see Conventions). |
 | `GET` | `/notes/{path}/backlinks` | built | Backlinks only. Nested route. |
-| `GET` | `/search?q=` | built (`q`/`tag`/`folder`/`limit`); `mode`/`k`/`threshold` designed | Search notes. `?mode=keyword\|semantic\|hybrid` (default `keyword`, fuzzy), `?k=`, `?threshold=`, `?tag=`, `?folder=`, `?limit=`. Returns ranked matches with snippets. Today the matcher is naive substring + count; fuzzy/semantic and the `mode`/`k`/`threshold` params are designed in [`SEARCH.md`](SEARCH.md). |
-| `GET` | `/search/status` | designed | Search/embedding state (semantic enabled, model, vectors, warming). |
+| `GET` | `/search?q=` | built (keyword/fuzzy; `semantic`/`hybrid` designed) | Search notes. `?mode=keyword\|semantic\|hybrid` (default `keyword`, **fuzzy via rapidfuzz**), `?threshold=`, `?tag=`, `?folder=`, `?limit=`. Returns ranked matches (`score`, `match_type`, snippet). `semantic`/`hybrid` → `409 semantic_disabled` until Tier 2 ships ([`SEARCH.md`](SEARCH.md)). |
+| `GET` | `/search/status` | built | Search/embedding state (keyword ready; semantic enabled/model/vectors/state). |
 | `GET` | `/tags` | built | All tags with note counts. |
 | `GET` | `/tags/{tag}` | built | Notes carrying a tag. |
 | `GET` | `/graph` | built | Whole-vault link graph (nodes + edges) for visualization/agent planning. Paginated/optional. |

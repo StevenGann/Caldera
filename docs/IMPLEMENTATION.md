@@ -14,7 +14,7 @@
 | **1. Correctness foundations** | path normalization + collision detection, atomic writes, ETag/If-Match, note-size ceiling, ambiguous-basename resolution, global link re-resolution, doc↔code routing reconcile | ✅ core done (2 minors → P2) |
 | **2. Sync rework** | debounce flusher, origin-wins reconcile + discard refs, push-failure/wedged handling, graceful drain | 🔨 core done (tested) |
 | **CI/CD + test infra** | GitHub Actions (CI matrix + GHCR release), pytest-cov, offline git-origin harness | ✅ done |
-| **3. Fuzzy search** | rapidfuzz scorer, `?mode=`, `/search/status` | ⬜ |
+| **3. Fuzzy search** | rapidfuzz scorer, `?mode=`, `/search/status` | ✅ keyword done (semantic → P5) |
 | **4. MCP server** | Streamable HTTP mount, tools/resources, Bearer middleware | ⬜ |
 | **5. Semantic search** | fastembed + sqlite-vec, opt-in | ⬜ |
 | **6. Deployment** | Dockerfile, k8s manifests, GitHub Actions → GHCR, `DEPLOYMENT.md` | ⬜ |
@@ -48,9 +48,11 @@
 - [ ] **m7 / m17** Auto-merge corruption surfaced (`last_auto_merge`); `DEPLOYMENT.md` stub; second-PVC decision.
 - [ ] **m13** Open-when-empty auth → opt-in `CALDERA_ALLOW_NO_AUTH`; key-entropy min; single-writer guard.
 
-### Phase 3 (search)
-- [ ] **m8** Semantic-disabled → `409`/`422` (not `501`); warming → `503 + Retry-After`.
-- [ ] **m16** Fallback hits report keyword `match_type` / `mode_used`; chunk overlap defaults; cross-mode score not comparable.
+### Phase 3 (search) — keyword done ✅ (`core/search.py`, `api/search.py`; `test_search.py`)
+- [x] Fuzzy keyword search (rapidfuzz): weighted name/heading/body/tag, `match_type`, snippet, threshold. Tests in `test_search.py`.
+- [x] `?mode=keyword|semantic|hybrid`, `?threshold=`; `/search/status` endpoint.
+- [x] **m8** Semantic-disabled → `409 semantic_disabled` (not `501`). Test `test_search_semantic_mode_disabled_returns_409`. *(warming `503+Retry-After` → Phase 5.)*
+- [ ] **m16** Fallback hits report keyword `match_type` / `mode_used`; chunk overlap defaults — Phase 5 (needs semantic).
 
 ### Phase 5 (semantic)
 - [ ] **m18** Require `--enable-loadable-sqlite-extensions`; detect missing → `search status:error`, don't crash.
@@ -59,7 +61,7 @@
 ### Cross-cutting / conventions
 - [ ] **M9 / m4** Representation: honor `Accept` + `Vary`, keep `?format=` override; define exactly what the sha256 covers.
 - [ ] **m10** Pagination cursor: opaque, delivery via body + `Link: rel="next"`, stability under background reset.
-- [ ] **m11** Normalize FastAPI/`RequestValidationError` (422) into the `{error:{...}}` envelope.
+- [x] **m11** FastAPI `HTTPException` + `RequestValidationError` (422) normalized into the `{error:{...}}` envelope (`main.py` handlers). Test `test_error_envelope_is_consistent_across_error_kinds`.
 - [ ] **m12** Unauthenticated `/docs` + `openapi.json` is an intentional trusted-network choice; add a gate toggle.
 - [ ] **m21** Narrow "Source applies uniformly" claim: origin-wins-with-quarantine is git-specific; define the conflict/recovery contract at the interface in source-neutral terms.
 - [ ] **m6** (enhancement) note `merge=union`/frontmatter-aware driver as deferred future work.
