@@ -1,5 +1,7 @@
 """End-to-end-ish API tests against the LocalSource (no git, no network)."""
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -11,6 +13,7 @@ def _configure_env(monkeypatch, vault_path, *, read_only=False, max_note_bytes=N
                    semantic_fallback=None):
     monkeypatch.setenv("CALDERA_SOURCE", "local")
     monkeypatch.setenv("CALDERA_VAULT_PATH", str(vault_path))
+    monkeypatch.setenv("CALDERA_DATA_PATH", str(Path(vault_path).parent / "caldera-data"))
     monkeypatch.setenv("CALDERA_API_KEYS", "test-key")
     monkeypatch.setenv("CALDERA_SYNC_INTERVAL", "0")
     monkeypatch.setenv("CALDERA_READ_ONLY", "true" if read_only else "false")

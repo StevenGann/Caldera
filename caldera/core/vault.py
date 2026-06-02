@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -22,6 +24,8 @@ from ..sources.base import Source
 from .index import Backlink, ResolvedLink, VaultIndex
 from .parser import parse_note
 from .paths import PathError, atomic_write, fold_key, normalize_key, safe_abs
+
+logger = logging.getLogger("caldera.vault")
 
 # Default cap on note size; overridable per-Vault (review M7). Keeps a giant paste
 # from blocking the event loop on read/parse/checksum or bloating commits.
@@ -88,11 +92,13 @@ def _checksum(raw: str) -> str:
 class Vault:
     def __init__(self, root: str | Path, source: Source, *, read_only: bool = False,
                  max_note_bytes: int = DEFAULT_MAX_NOTE_BYTES,
-                 on_change=None) -> None:
+                 on_change=None, data_path: str | Path | None = None) -> None:
         self.root = Path(root).resolve()
         self.source = source
         self.read_only = read_only
         self.max_note_bytes = max_note_bytes
+        # Journal for crash-safe multi-file moves (review M4); None disables it.
+        self._journal = Path(data_path) / "move.journal" if data_path else None
         # Called (synchronously) after each successful write with the touched
         # paths. The sync engine uses it to arm the debounced commit/push flush
         # (DESIGN §5.3); commits are NOT made per write.
@@ -306,6 +312,10 @@ class Vault:
             if dst != src:
                 self._guard_collision(dst)
             raw = entry.parsed.raw
+            # Record intent before touching disk so an interrupted multi-file move
+            # is completed-forward on the next boot (review M4).
+            if update_links:
+                self._write_journal(src, dst, entry.name)
             dst_abs.parent.mkdir(parents=True, exist_ok=True)
             self._abs(src).rename(dst_abs)
             self.index.remove(src)
@@ -313,8 +323,42 @@ class Vault:
             touched = [src, dst]
             if update_links:
                 touched += self._rewrite_links(old_name=entry.name, new_path=dst)
+                self._clear_journal()
             self.on_change(touched)
             return self.view(dst)
+
+    # ── Move journal (crash-safe link rewrites, M4) ─────────────────
+    def _write_journal(self, src: str, dst: str, old_name: str) -> None:
+        if self._journal is None:
+            return
+        self._journal.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(self._journal, json.dumps({"src": src, "dst": dst, "old_name": old_name}))
+
+    def _clear_journal(self) -> None:
+        if self._journal is not None:
+            self._journal.unlink(missing_ok=True)
+
+    def recover_journal(self) -> bool:
+        """If a move was interrupted, finish the rename + link rewrites idempotently.
+        Call after the boot reindex (the index must exist). Returns True if it ran."""
+        if self._journal is None or not self._journal.exists():
+            return False
+        try:
+            data = json.loads(self._journal.read_text())
+            src, dst, old_name = data["src"], data["dst"], data["old_name"]
+        except (OSError, ValueError, KeyError):
+            self._clear_journal()
+            return False
+        src_abs, dst_abs = self._abs(src), self._abs(dst)
+        if src_abs.exists() and not dst_abs.exists():
+            dst_abs.parent.mkdir(parents=True, exist_ok=True)
+            src_abs.rename(dst_abs)
+            self.index.upsert(dst, parse_note(dst_abs.read_text(encoding="utf-8")))
+            self.index.remove(src)
+        self._rewrite_links(old_name=old_name, new_path=dst)  # idempotent
+        self._clear_journal()
+        logger.warning("completed interrupted move %s -> %s from journal", src, dst)
+        return True
 
     # ── Internal helpers ────────────────────────────────────────────
     def _check(self, rel: str, expected: str | None = None, etag: str | None = None) -> None:

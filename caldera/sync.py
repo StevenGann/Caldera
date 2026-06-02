@@ -22,7 +22,8 @@ logger = logging.getLogger("caldera.sync")
 
 class SyncEngine:
     def __init__(self, vault: Vault, *, interval: int, debounce: float, max_wait: float,
-                 read_only: bool = False, post_reindex=None, heartbeat=None) -> None:
+                 read_only: bool = False, post_reindex=None, heartbeat=None,
+                 on_paths_changed=None) -> None:
         self.vault = vault
         self.source = vault.source
         self.interval = interval
@@ -33,6 +34,11 @@ class SyncEngine:
         # so slow CPU work doesn't hold the vault lock against API writes.
         self.post_reindex = post_reindex
         self.heartbeat = heartbeat  # single-writer lock heartbeat (m13)
+        # Fired (added, removed) when a reconcile changes the note path SET — i.e.
+        # external edits, not Caldera's own writes (suppresses push-echo). Drives
+        # MCP resources/list_changed (review m5).
+        self.on_paths_changed = on_paths_changed
+        self._known_paths: set[str] | None = None
 
         self._poke = asyncio.Event()
         self._stop_evt = asyncio.Event()
@@ -43,6 +49,10 @@ class SyncEngine:
         self._tasks: list[asyncio.Task] = []
         self.state = "idle"
         self.next_poll: datetime | None = None
+
+    def seed_paths(self) -> None:
+        """Record the current note set as the baseline (call after boot reindex)."""
+        self._known_paths = set(self.vault.index.notes)
 
     # ── Change notification (called by Vault after each write) ──────
     def note_changed(self, paths: list[str] | None = None) -> None:
@@ -96,6 +106,15 @@ class SyncEngine:
             await asyncio.to_thread(self.post_reindex)
         if self.heartbeat is not None:
             self.heartbeat()
+        if self.on_paths_changed is not None and result.changed:
+            new = set(self.vault.index.notes)
+            if self._known_paths is not None and new != self._known_paths:
+                added, removed = new - self._known_paths, self._known_paths - new
+                try:
+                    self.on_paths_changed(added, removed)
+                except Exception:  # pragma: no cover
+                    logger.exception("on_paths_changed hook failed")
+            self._known_paths = new
         return result
 
     # ── Loops ───────────────────────────────────────────────────────

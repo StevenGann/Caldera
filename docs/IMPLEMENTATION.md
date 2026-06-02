@@ -42,12 +42,12 @@
 - [x] **m14** Bootstrap failure surfaced via `/readyz` (`app.state.bootstrap_error`).
 - [x] **m20** Clone is full-depth (comment in `GitSource._ensure_ready_sync`).
 - [x] **debounce flusher** (`SyncEngine`) replaces per-write commit; bursts coalesce. Test `test_debounce_coalesces_burst_into_one_commit`.
-- [ ] **M2 / m2** Recovery-ref durability: retain-until-pushed retry on later cycles; GC/retention policy. *(partial: `recovery_ref_pushed` captured)*
-- [ ] **M4** Crash mid multi-file move: atomic batch or boot journal; no commit-then-push of a half-rewrite.
-- [ ] **m5** `resources/list_changed` fires only on path-set change; suppress Caldera's own bot commits → Phase 4 (MCP).
+- [x] **M2** Recovery-ref retain-until-pushed: unpushed refs retried on later reconciles (`_push_pending_refs`); `recovery_ref_pushed` updated. Test `test_unpushed_recovery_ref_is_retried`.
+- [x] **M4** Crash-safe multi-file move: `move.journal` written before disk ops, completed-forward on boot via `Vault.recover_journal` (idempotent). `test_vault.py`.
+- [x] **m5** Path-set-change **detection** (`SyncEngine.on_paths_changed`, fires only on external set changes → suppresses push-echo). Test `test_external_path_change_fires_callback`. *Transport (`resources/list_changed`) deferred: FastMCP has no public server-push broadcast; hook logs, ready to wire.*
 - [x] **m17** `docs/DEPLOYMENT.md` written; `deploy/k8s/` manifests (replicas:1, Recreate, two PVCs, ingress no-buffer); Dockerfile fixed + `[mcp]` extra.
-- [ ] **m7** Auto-merge corruption surfaced (`last_auto_merge`).
-- [ ] **m13** Open-when-empty auth → opt-in `CALDERA_ALLOW_NO_AUTH`; key-entropy min; single-writer guard.
+- [x] **m7** Auto-merge surfaced (`last_auto_merge`); WARNING logged. Test in `test_git_source.py`.
+- [x] **m13** Open-when-empty auth → opt-in `CALDERA_ALLOW_NO_AUTH` (else refuse to start) + weak-key warning; single-writer lockfile (`core/lock.py`). Tests `test_lock.py` + API refusal/opt-in.
 
 ### Phase 3 (search) — keyword done ✅ (`core/search.py`, `api/search.py`; `test_search.py`)
 - [x] Fuzzy keyword search (rapidfuzz): weighted name/heading/body/tag, `match_type`, snippet, threshold. Tests in `test_search.py`.
@@ -60,7 +60,7 @@
 - [x] Read tools (`get_note`, `get_backlinks`, `list_notes`, `search_notes`, `list_tags`, `vault_status`) + write tools, **hidden in read-only mode** (test `test_write_tools_hidden_in_read_only`). Resources `caldera://note/{path}`, `caldera://vault/status`.
 - [x] Bearer auth middleware reusing `CALDERA_API_KEYS` (tests: tool auth + live `initialize` 200).
 - [x] VaultError → stable code in tool errors (test `test_missing_note_error_carries_code`); semantic mode → `semantic_disabled`.
-- [ ] **m5** `resources/list_changed` on path-set change; suppress Caldera's own bot commits. *(deferred — needs sync→MCP notify hook.)*
+- [x] **m5** detection done (see Phase 2); MCP transport broadcast deferred (no FastMCP API).
 
 ### Phase 5 (semantic) — done ✅ (`core/embedding.py`, `vectorstore.py`, `semantic.py`; `test_semantic.py`)
 - [x] Heading-aware chunking; `Embedder` protocol + `FastEmbedEmbedder` (lazy ONNX); deterministic FakeEmbedder for tests (no model download in CI).

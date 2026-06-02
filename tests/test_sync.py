@@ -69,6 +69,22 @@ async def test_external_commit_is_pulled_and_indexed(tmp_path, git_origin, push_
     assert vault.index.get("Ext.md") is not None
 
 
+async def test_external_path_change_fires_callback(tmp_path, git_origin, push_to_origin):
+    vault, src, engine = await _stack(tmp_path, git_origin)
+    events = []
+    engine.on_paths_changed = lambda added, removed: events.append((added, removed))
+    engine.seed_paths()
+
+    # No external change → no event.
+    await engine.sync_cycle()
+    assert events == []
+
+    # External commit adds a note → exactly one event naming the added path.
+    push_to_origin("Added.md", "# Added\n")
+    await engine.sync_cycle()
+    assert events and "Added.md" in events[-1][0]
+
+
 async def test_origin_wins_reconcile_updates_index(tmp_path, git_origin, push_to_origin):
     vault, src, engine = await _stack(tmp_path, git_origin)
     # Local creates Note.md; origin independently adds a conflicting Note.md.

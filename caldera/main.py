@@ -163,6 +163,7 @@ async def lifespan(app: FastAPI):
         source,
         read_only=settings.read_only,
         max_note_bytes=settings.max_note_bytes,
+        data_path=settings.data_path,
     )
     app.state.vault = vault
 
@@ -178,6 +179,12 @@ async def lifespan(app: FastAPI):
         except Exception:  # pragma: no cover - keep sync alive
             logger.exception("semantic reconcile failed")
 
+    def _notify_paths_changed(added, removed) -> None:
+        # The note set changed from an external edit. FastMCP currently has no
+        # public server→client broadcast for resources/list_changed (review m5);
+        # log it so it's observable and ready to wire when the SDK supports it.
+        logger.info("vault note set changed (external): +%d -%d", len(added), len(removed))
+
     sync = SyncEngine(
         vault,
         interval=settings.sync_interval,
@@ -186,6 +193,7 @@ async def lifespan(app: FastAPI):
         read_only=settings.read_only,
         post_reindex=_reconcile_semantic if semantic is not None else None,
         heartbeat=writer_lock.heartbeat if writer_lock is not None else None,
+        on_paths_changed=_notify_paths_changed,
     )
     vault.on_change = sync.note_changed  # writes arm the debounced flush
     app.state.sync = sync
@@ -197,8 +205,11 @@ async def lifespan(app: FastAPI):
         try:
             await source.ensure_ready()
             await asyncio.to_thread(vault.reindex)
+            if not settings.read_only:
+                await asyncio.to_thread(vault.recover_journal)  # finish interrupted move (M4)
             app.state.ready = True
             logger.info("vault ready: %d notes indexed", len(vault.index))
+            sync.seed_paths()  # baseline for external-change detection (m5)
             sync.start()
             if semantic is not None:
                 # Embed the existing vault in the background (readiness is NOT
