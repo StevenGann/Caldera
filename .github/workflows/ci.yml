@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv pip install --system -e '.[dev]'
+
+      - name: Configure git identity (for git-backed source tests)
+        run: |
+          git config --global user.email "ci@caldera.test"
+          git config --global user.name "Caldera CI"
+          git config --global init.defaultBranch main
+
+      - name: Lint (ruff)
+        run: ruff check caldera tests
+
+      - name: Test (pytest + coverage)
+        run: pytest -q --cov=caldera --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage artifact
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: ignore
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image (no push) to validate the Dockerfile
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: caldera:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
