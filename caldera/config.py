@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "info"
+    mcp_enabled: bool = True  # mount the MCP server at /mcp (MCP.md)
 
     # ── Vault source ────────────────────────────────────────────────
     source: Literal["github", "local"] = "github"

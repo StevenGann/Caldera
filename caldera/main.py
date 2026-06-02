@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from contextlib import asynccontextmanager
+import secrets
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
@@ -41,6 +42,52 @@ _STATUS_CODE: dict[int, str] = {
     413: "note_too_large", 422: "validation_error", 500: "internal_error",
     503: "unavailable",
 }
+
+
+class _BearerASGIMiddleware:
+    """Bearer-key auth in front of the mounted MCP ASGI app, reusing
+    CALDERA_API_KEYS (MCP.md §6). Open when no keys are configured."""
+
+    def __init__(self, app, settings_getter):
+        self.app = app
+        self._settings = settings_getter
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            keys = self._settings().api_keys
+            if keys:
+                headers = dict(scope.get("headers") or [])
+                auth = headers.get(b"authorization", b"").decode()
+                token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+                if not any(secrets.compare_digest(token, k) for k in keys):
+                    body = b'{"error":{"code":"unauthorized","message":"invalid API key"}}'
+                    await send({"type": "http.response.start", "status": 401, "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"www-authenticate", b"Bearer"),
+                    ]})
+                    await send({"type": "http.response.body", "body": body})
+                    return
+        await self.app(scope, receive, send)
+
+
+def _mount_mcp(app: FastAPI, settings: Settings):
+    """Build the MCP server and mount it at /mcp behind Bearer auth. Returns the
+    FastMCP (for its session-manager lifespan) or None if disabled/unavailable."""
+    if not settings.mcp_enabled:
+        return None
+    try:
+        from .mcp_server import build_mcp
+    except ImportError:
+        logger.warning("MCP enabled but the 'mcp' package is not installed; skipping /mcp")
+        return None
+    mcp = build_mcp(
+        lambda: app.state.vault,
+        read_only=settings.read_only,
+        sync_cycle=lambda **kw: app.state.sync.sync_cycle(**kw),
+    )
+    mcp.settings.streamable_http_path = "/"  # mounted at /mcp → endpoint is /mcp
+    app.mount("/mcp", _BearerASGIMiddleware(mcp.streamable_http_app(), get_settings))
+    return mcp
 
 
 @asynccontextmanager
@@ -86,11 +133,17 @@ async def lifespan(app: FastAPI):
             logger.exception("vault bootstrap failed")
 
     boot = asyncio.create_task(_bootstrap())
-    try:
-        yield
-    finally:
-        boot.cancel()
-        await sync.stop()
+    mcp = getattr(app.state, "mcp", None)
+    async with AsyncExitStack() as stack:
+        if mcp is not None:
+            # FastMCP's Streamable HTTP needs its session manager running inside
+            # the host app's lifespan (MCP.md §3).
+            await stack.enter_async_context(mcp.session_manager.run())
+        try:
+            yield
+        finally:
+            boot.cancel()
+            await sync.stop()
 
 
 def create_app() -> FastAPI:
@@ -151,6 +204,9 @@ def create_app() -> FastAPI:
     app.include_router(notes.router)
     app.include_router(search.router)
     app.include_router(vault_api.router)
+
+    # Mount the MCP server (shares the vault; tools/resources over Streamable HTTP).
+    app.state.mcp = _mount_mcp(app, get_settings())
 
     @app.get("/", include_in_schema=False)
     def root() -> dict[str, str]:

@@ -15,7 +15,7 @@
 | **2. Sync rework** | debounce flusher, origin-wins reconcile + discard refs, push-failure/wedged handling, graceful drain | 🔨 core done (tested) |
 | **CI/CD + test infra** | GitHub Actions (CI matrix + GHCR release), pytest-cov, offline git-origin harness | ✅ done |
 | **3. Fuzzy search** | rapidfuzz scorer, `?mode=`, `/search/status` | ✅ keyword done (semantic → P5) |
-| **4. MCP server** | Streamable HTTP mount, tools/resources, Bearer middleware | ⬜ |
+| **4. MCP server** | Streamable HTTP mount, tools/resources, Bearer middleware | ✅ done (semantic tool → P5) |
 | **5. Semantic search** | fastembed + sqlite-vec, opt-in | ⬜ |
 | **6. Deployment** | Dockerfile, k8s manifests, GitHub Actions → GHCR, `DEPLOYMENT.md` | ⬜ |
 
@@ -53,6 +53,13 @@
 - [x] `?mode=keyword|semantic|hybrid`, `?threshold=`; `/search/status` endpoint.
 - [x] **m8** Semantic-disabled → `409 semantic_disabled` (not `501`). Test `test_search_semantic_mode_disabled_returns_409`. *(warming `503+Retry-After` → Phase 5.)*
 - [ ] **m16** Fallback hits report keyword `match_type` / `mode_used`; chunk overlap defaults — Phase 5 (needs semantic).
+
+### Phase 4 (MCP) — done ✅ (`mcp_server.py`, `main._mount_mcp`; `test_mcp.py`)
+- [x] FastMCP Streamable HTTP mounted at `/mcp`, sharing the Vault via a provider; session manager run in the lifespan.
+- [x] Read tools (`get_note`, `get_backlinks`, `list_notes`, `search_notes`, `list_tags`, `vault_status`) + write tools, **hidden in read-only mode** (test `test_write_tools_hidden_in_read_only`). Resources `caldera://note/{path}`, `caldera://vault/status`.
+- [x] Bearer auth middleware reusing `CALDERA_API_KEYS` (tests: tool auth + live `initialize` 200).
+- [x] VaultError → stable code in tool errors (test `test_missing_note_error_carries_code`); semantic mode → `semantic_disabled`.
+- [ ] **m5** `resources/list_changed` on path-set change; suppress Caldera's own bot commits. *(deferred — needs sync→MCP notify hook.)*
 
 ### Phase 5 (semantic)
 - [ ] **m18** Require `--enable-loadable-sqlite-extensions`; detect missing → `search status:error`, don't crash.

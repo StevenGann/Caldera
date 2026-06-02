@@ -186,6 +186,13 @@ def test_search_status_reports_keyword_only(client):
     assert body["keyword"] == "ready" and body["semantic_enabled"] is False
 
 
+def test_mcp_endpoint_requires_auth(client):
+    # The mounted /mcp app is guarded by the same Bearer keys (MCP.md §6).
+    r = client.get("/mcp/", headers={"Authorization": ""})
+    assert r.status_code == 401
+    assert r.json()["error"]["code"] == "unauthorized"
+
+
 def test_error_envelope_is_consistent_across_error_kinds(client):
     # Auth error (401), validation error (422), and not-found (404) all use the
     # {error:{code,message,detail}} envelope (review m11).
