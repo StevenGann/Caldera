@@ -6,32 +6,10 @@ hash-guarded embedding, reconcile, ranked dedup search, persistence).
 
 from __future__ import annotations
 
-import hashlib
-import re
-
 from caldera.core.embedding import chunk_note
 from caldera.core.semantic import SemanticIndex
 from caldera.core.vectorstore import SqliteVectorStore
-
-
-class FakeEmbedder:
-    """Stable bag-of-words embedding so similar text → similar vectors."""
-
-    model = "fake-bow"
-    dim = 64
-
-    def _vec(self, text: str) -> list[float]:
-        v = [0.0] * self.dim
-        for tok in re.findall(r"[a-z0-9]+", text.lower()):
-            h = int(hashlib.md5(tok.encode()).hexdigest(), 16) % self.dim
-            v[h] += 1.0
-        return v
-
-    def embed_passages(self, texts):
-        return [self._vec(t) for t in texts]
-
-    def embed_query(self, text):
-        return self._vec(text)
+from tests.conftest import FakeEmbedder
 
 
 # ── Chunking ───────────────────────────────────────────────────────────

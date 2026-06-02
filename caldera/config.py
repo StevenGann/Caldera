@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     # NoDecode: let our validator split the comma-separated env string instead
     # of pydantic-settings trying to JSON-decode it first.
     api_keys: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    allow_no_auth: bool = False  # must opt in to run with no API keys (review m13)
     read_only: bool = False
     max_note_bytes: int = 5 * 1024 * 1024
     search_fuzzy_threshold: float = 60.0  # min keyword-search score 0–100 (SEARCH.md §7)

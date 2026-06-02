@@ -69,7 +69,8 @@ def serialize_note(v: NoteView) -> dict[str, Any]:
 
 
 def build_mcp(get_vault: Callable[[], Vault], *, read_only: bool = False,
-              sync_cycle: Callable[..., Any] | None = None):
+              sync_cycle: Callable[..., Any] | None = None,
+              get_semantic: Callable[[], Any] | None = None):
     """Construct the FastMCP server bound to the vault provider."""
     from mcp.server.fastmcp import FastMCP
 
@@ -111,11 +112,21 @@ def build_mcp(get_vault: Callable[[], Vault], *, read_only: bool = False,
     async def search_notes(query: str, mode: str = "keyword", tag: str | None = None,
                            folder: str | None = None, threshold: float | None = None,
                            limit: int = 20) -> list[dict]:
-        """Search notes. mode=keyword (fuzzy, default). Prefer keyword for known
-        titles/phrases. semantic/hybrid are not enabled yet."""
-        if mode in ("semantic", "hybrid"):
-            raise McpToolError(f"semantic_disabled: mode={mode} is not enabled")
+        """Search notes. mode=keyword (fuzzy, default) or semantic (if enabled).
+        Prefer keyword for known titles/phrases, semantic for conceptual queries."""
+        if mode == "hybrid":
+            raise McpToolError("hybrid_unavailable: hybrid search is not implemented")
         vault = get_vault()
+        if mode == "semantic":
+            semantic = get_semantic() if get_semantic is not None else None
+            if semantic is None:
+                raise McpToolError("semantic_disabled: semantic search is not enabled")
+            allowed = set(vault.list_notes(folder=folder, tag=tag))
+            hits = semantic.search(query, k=limit, threshold=(threshold or 0) / 100.0)
+            return [{"path": h.path, "name": (vault.index.get(h.path).name
+                     if vault.index.get(h.path) else h.path), "snippet": h.snippet,
+                     "score": h.score, "match_type": "semantic"}
+                    for h in hits if h.path in allowed]
         cands = vault.list_notes(folder=folder, tag=tag)
         hits = keyword_search(vault.index, query, candidates=cands, limit=limit,
                               threshold=threshold if threshold is not None else 60.0)

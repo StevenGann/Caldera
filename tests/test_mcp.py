@@ -81,12 +81,25 @@ async def test_search_notes_keyword(tmp_path):
     assert hits and hits[0]["path"] == "Caldera.md"
 
 
-async def test_semantic_mode_errors(tmp_path):
+async def test_semantic_mode_errors_when_disabled(tmp_path):
     vault = await _vault(tmp_path)
-    mcp = build_mcp(lambda: vault, read_only=False)
+    mcp = build_mcp(lambda: vault, read_only=False)  # no semantic provider
     with pytest.raises(Exception) as ei:
         await mcp.call_tool("search_notes", {"query": "x", "mode": "semantic"})
     assert "semantic_disabled" in str(ei.value)
+
+
+async def test_semantic_mode_works_when_wired(tmp_path):
+    from caldera.core.semantic import SemanticIndex
+    from caldera.core.vectorstore import SqliteVectorStore
+    from tests.conftest import FakeEmbedder
+
+    vault = await _vault(tmp_path)
+    idx = SemanticIndex(FakeEmbedder(), SqliteVectorStore(tmp_path / "v.db", model="fake-bow", dim=64))
+    idx.reconcile({p: e.parsed.content for p, e in vault.index.notes.items()})
+    mcp = build_mcp(lambda: vault, read_only=False, get_semantic=lambda: idx)
+    hits = await _call(mcp, "search_notes", query="project", mode="semantic")
+    assert hits and all(h["match_type"] == "semantic" for h in hits)
 
 
 async def test_missing_note_error_carries_code(tmp_path):

@@ -53,6 +53,8 @@ async def test_reconcile_clean_merge_on_disjoint_files(tmp_path, git_origin, pus
     res = await src.reconcile()
     assert res.merged and not res.discarded
     assert (src.root / "Local.md").exists() and (src.root / "Remote.md").exists()
+    # The auto-merge is surfaced for human verification (review m7).
+    assert src.status().last_auto_merge is not None
 
 
 async def test_reconcile_origin_wins_discards_and_saves_recovery_ref(

@@ -107,6 +107,9 @@ class SyncStatus(BaseModel):
     last_discard: dict[str, Any] | None = Field(
         None, description="Last origin-wins discard: recovery ref, commit count, timestamp."
     )
+    last_auto_merge: dict[str, Any] | None = Field(
+        None, description="Last clean auto-merge from origin (verify — may be semantically off)."
+    )
     next_poll: datetime | None = None
     state: Literal[
         "idle", "syncing", "conflict", "conflict_blocked", "push_wedged", "error"

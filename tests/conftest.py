@@ -7,10 +7,31 @@ reconcile — is exercised end-to-end **offline** (no network, no GitHub).
 
 from __future__ import annotations
 
+import hashlib
+import re
 import subprocess
 from pathlib import Path
 
 import pytest
+
+
+class FakeEmbedder:
+    """Deterministic bag-of-words embedder so tests need no model download."""
+
+    model = "fake-bow"
+    dim = 64
+
+    def _vec(self, text: str) -> list[float]:
+        v = [0.0] * self.dim
+        for tok in re.findall(r"[a-z0-9]+", text.lower()):
+            v[int(hashlib.md5(tok.encode()).hexdigest(), 16) % self.dim] += 1.0
+        return v
+
+    def embed_passages(self, texts):
+        return [self._vec(t) for t in texts]
+
+    def embed_query(self, text):
+        return self._vec(text)
 
 
 def git(cwd: Path | str, *args: str) -> str:

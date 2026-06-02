@@ -208,6 +208,31 @@ def test_search_status_reports_keyword_only(client):
     assert body["keyword"] == "ready" and body["semantic_enabled"] is False
 
 
+def test_refuses_to_start_with_no_keys_and_no_optin(tmp_path, monkeypatch):
+    (tmp_path / "A.md").write_text("x", encoding="utf-8")
+    _configure_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("CALDERA_API_KEYS", "")  # no keys, no opt-in
+    get_settings.cache_clear()
+    app = create_app()
+    with pytest.raises(RuntimeError):
+        with TestClient(app):
+            pass
+
+
+def test_allows_no_auth_when_opted_in(tmp_path, monkeypatch):
+    (tmp_path / "A.md").write_text("x", encoding="utf-8")
+    _configure_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("CALDERA_API_KEYS", "")
+    monkeypatch.setenv("CALDERA_ALLOW_NO_AUTH", "true")
+    get_settings.cache_clear()
+    app = create_app()
+    with TestClient(app) as c:
+        for _ in range(50):
+            if c.get("/readyz").json().get("ready"):
+                break
+        assert c.get("/api/v1/notes").status_code == 200  # open, no Authorization needed
+
+
 def test_mcp_endpoint_requires_auth(client):
     # The mounted /mcp app is guarded by the same Bearer keys (MCP.md §6).
     r = client.get("/mcp/", headers={"Authorization": ""})

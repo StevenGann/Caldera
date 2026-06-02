@@ -27,6 +27,7 @@ class SourceStatus:
     last_push: datetime | None = None
     last_error: str | None = None
     last_discard: dict | None = None
+    last_auto_merge: dict | None = None  # last clean auto-merge (may be semantically off)
     detail: dict = field(default_factory=dict)
 
 

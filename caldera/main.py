@@ -85,10 +85,32 @@ def _mount_mcp(app: FastAPI, settings: Settings):
         lambda: app.state.vault,
         read_only=settings.read_only,
         sync_cycle=lambda **kw: app.state.sync.sync_cycle(**kw),
+        get_semantic=lambda: getattr(app.state, "semantic", None),
     )
     mcp.settings.streamable_http_path = "/"  # mounted at /mcp → endpoint is /mcp
     app.mount("/mcp", _BearerASGIMiddleware(mcp.streamable_http_app(), get_settings))
     return mcp
+
+
+_MIN_KEY_LEN = 16
+
+
+def _check_auth_config(settings: Settings) -> None:
+    """Refuse to start open-by-accident; warn on weak keys (review m13)."""
+    if not settings.api_keys:
+        if not settings.allow_no_auth:
+            raise RuntimeError(
+                "No CALDERA_API_KEYS configured. Set keys, or explicitly opt into an "
+                "unauthenticated, trusted-network deployment with CALDERA_ALLOW_NO_AUTH=true."
+            )
+        logger.warning("Running with NO API authentication (CALDERA_ALLOW_NO_AUTH=true)")
+    else:
+        for k in settings.api_keys:
+            if len(k) < _MIN_KEY_LEN:
+                logger.warning(
+                    "An API key is shorter than %d chars; use a long random key.", _MIN_KEY_LEN
+                )
+                break
 
 
 def _build_semantic(settings: Settings):
@@ -120,6 +142,7 @@ async def lifespan(app: FastAPI):
         level=settings.log_level.upper(),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    _check_auth_config(settings)
     app.state.ready = False
 
     source = build_source(settings)

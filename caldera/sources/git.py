@@ -180,6 +180,14 @@ class GitSource(Source):
         try:
             self.repo.git.merge("--no-edit", remote_ref)
             self._status.state = "idle"
+            # A textually-clean merge can still be semantically broken — surface it.
+            self._status.last_auto_merge = {
+                "at": datetime.now(timezone.utc).isoformat(),
+                "branch": self.branch,
+                "behind": behind,
+            }
+            logger.warning("auto-merged origin/%s into local (%d commit(s)) — verify the result",
+                           self.branch, behind)
             return ReconcileResult(pulled=behind, merged=True)
         except git.GitCommandError:
             self.repo.git.merge("--abort")

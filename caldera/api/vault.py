@@ -43,6 +43,7 @@ def sync_status(
         committed_unpushed=src.committed_unpushed,
         last_error=src.last_error,
         last_discard=src.last_discard,
+        last_auto_merge=src.last_auto_merge,
         next_poll=sync.next_poll,
         state=src.state,  # type: ignore[arg-type]
     )
