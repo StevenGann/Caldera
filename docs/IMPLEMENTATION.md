@@ -16,7 +16,7 @@
 | **CI/CD + test infra** | GitHub Actions (CI matrix + GHCR release), pytest-cov, offline git-origin harness | ✅ done |
 | **3. Fuzzy search** | rapidfuzz scorer, `?mode=`, `/search/status` | ✅ keyword done (semantic → P5) |
 | **4. MCP server** | Streamable HTTP mount, tools/resources, Bearer middleware | ✅ done (semantic tool → P5) |
-| **5. Semantic search** | fastembed + sqlite-vec, opt-in | ⬜ |
+| **5. Semantic search** | fastembed + vector store, opt-in | ✅ done (plain-sqlite store) |
 | **6. Deployment** | Dockerfile, k8s manifests, GitHub Actions → GHCR, `DEPLOYMENT.md` | ✅ done |
 
 ## Open findings → resolution (from design review)
@@ -62,9 +62,14 @@
 - [x] VaultError → stable code in tool errors (test `test_missing_note_error_carries_code`); semantic mode → `semantic_disabled`.
 - [ ] **m5** `resources/list_changed` on path-set change; suppress Caldera's own bot commits. *(deferred — needs sync→MCP notify hook.)*
 
-### Phase 5 (semantic)
-- [ ] **m18** Require `--enable-loadable-sqlite-extensions`; detect missing → `search status:error`, don't crash.
-- [ ] **m19** fastembed query/passage prefix is model-specific (bge vs nomic) — model swap isn't purely one env var.
+### Phase 5 (semantic) — done ✅ (`core/embedding.py`, `vectorstore.py`, `semantic.py`; `test_semantic.py`)
+- [x] Heading-aware chunking; `Embedder` protocol + `FastEmbedEmbedder` (lazy ONNX); deterministic FakeEmbedder for tests (no model download in CI).
+- [x] **Vector store: plain SQLite + numpy brute-force cosine** (persistent, outside the vault). **Deviation from the design's sqlite-vec** — sidesteps the loadable-extension portability issue (**m18 resolved by avoidance**) and is simpler at single-agent scale; sqlite-vec stays a future optimization.
+- [x] `SemanticIndex`: hash-guarded incremental embed, `reconcile` (embed new/changed, drop removed), ranked per-note dedup search with snippets. Model/dim change wipes & re-embeds.
+- [x] Wired: lifespan builds it when `CALDERA_SEMANTIC_SEARCH=true` (best-effort, never blocks startup); embedded in background; reconciled after each sync cycle **outside the lock**. `/search?mode=semantic` + `/search/status`; keyword fallback (**m16**) or `409` per `CALDERA_SEMANTIC_FALLBACK`.
+- [x] **m19** model-specific query/passage prefix noted in `FastEmbedEmbedder`.
+- [x] Real fastembed (`bge-small-en-v1.5`, dim 384) validated end-to-end (correct ranking).
+- [ ] MCP `search_notes` semantic wiring; `503+Retry-After` warming state → optional follow-ups.
 
 ### Cross-cutting / conventions
 - [ ] **M9 / m4** Representation: honor `Accept` + `Vary`, keep `?format=` override; define exactly what the sha256 covers.

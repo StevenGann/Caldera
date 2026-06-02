@@ -93,6 +93,12 @@ heading_path, content_hash }`. A search returns the **best-scoring chunk per
 note**, deduplicated to the note, with the chunk's text as the snippet. (Starting
 heading-aware rather than truncate-the-tail avoids silently dropping note content.)
 
+> **Implementation note (built):** the shipped store is **plain SQLite + numpy
+> brute-force cosine**, not `sqlite-vec`. This sidesteps the loadable-extension
+> portability requirement (§3.3 / review m18) and is simpler at the single-agent
+> scale; `sqlite-vec` remains a future optimization. The rest of this section
+> describes the original design intent.
+
 ### 3.3 Vector store
 - **Store:** [`sqlite-vec`](https://github.com/asg017/sqlite-vec) — a tiny,
   dependency-free SQLite extension (pure C, ships as a pip wheel loadable into

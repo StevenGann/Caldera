@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from ..config import Settings, get_settings
 from ..core.search import keyword_search
 from ..core.vault import Vault
-from ..dependencies import get_vault, require_api_key
+from ..dependencies import get_semantic, get_vault, require_api_key
 from ..models import NoteStub
 
 router = APIRouter(prefix="/api/v1", tags=["search"], dependencies=[Depends(require_api_key)])
@@ -60,17 +60,34 @@ def search(
     limit: int = Query(50, ge=1, le=500),
     vault: Vault = Depends(get_vault),
     settings: Settings = Depends(get_settings),
+    semantic=Depends(get_semantic),
 ) -> list[SearchHit]:
-    if mode in ("semantic", "hybrid"):
-        # Semantic search (SEARCH.md Tier 2) is not built yet. Per RFC 9110,
-        # a configured-off feature is 409, not 501 (review m8).
+    if mode == "hybrid":
+        # Hybrid fusion (Tier 3) is deferred; surface it honestly (not 501).
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "semantic_disabled",
-                "message": f"mode={mode} requires semantic search, which is not enabled",
-            },
+            detail={"code": "hybrid_unavailable", "message": "hybrid search is not implemented"},
         )
+    if mode == "semantic":
+        if semantic is not None:
+            allowed = set(vault.list_notes(folder=folder, tag=tag))
+            hits = semantic.search(q, k=limit, threshold=(threshold or 0) / 100.0)
+            out = []
+            for h in hits:
+                entry = vault.index.get(h.path)
+                if entry and h.path in allowed:
+                    out.append(SearchHit(path=h.path, name=entry.name, snippet=h.snippet,
+                                         score=h.score, match_type="semantic"))
+            return out
+        if not settings.semantic_fallback:
+            # Per RFC 9110, a configured-off feature is 409, not 501 (review m8).
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "semantic_disabled",
+                        "message": "semantic search is not enabled"},
+            )
+        # else: fall through to keyword (hits report a keyword match_type — m16).
+
     candidates = vault.list_notes(folder=folder, tag=tag)
     hits = keyword_search(
         vault.index,
@@ -87,9 +104,18 @@ def search(
 
 
 @router.get("/search/status", response_model=SearchStatus)
-def search_status(settings: Settings = Depends(get_settings)) -> SearchStatus:
-    # Semantic tier is not built yet; report keyword-only.
-    return SearchStatus(keyword="ready", semantic_enabled=False, state="disabled")
+def search_status(
+    settings: Settings = Depends(get_settings), semantic=Depends(get_semantic)
+) -> SearchStatus:
+    if semantic is None:
+        return SearchStatus(keyword="ready", semantic_enabled=False, state="disabled")
+    return SearchStatus(
+        keyword="ready",
+        semantic_enabled=True,
+        state="ready",
+        model=semantic.store.model,
+        vectors=semantic.store.count(),
+    )
 
 
 @router.get("/tags", response_model=list[TagCount])

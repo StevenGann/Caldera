@@ -25,6 +25,11 @@ def get_sync(request: Request) -> SyncEngine:
     return request.app.state.sync
 
 
+def get_semantic(request: Request):
+    """The SemanticIndex if semantic search is enabled and built, else None."""
+    return getattr(request.app.state, "semantic", None)
+
+
 def require_api_key(
     authorization: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),

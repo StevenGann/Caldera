@@ -7,7 +7,8 @@ from caldera.config import get_settings
 from caldera.main import create_app
 
 
-def _configure_env(monkeypatch, vault_path, *, read_only=False, max_note_bytes=None):
+def _configure_env(monkeypatch, vault_path, *, read_only=False, max_note_bytes=None,
+                   semantic_fallback=None):
     monkeypatch.setenv("CALDERA_SOURCE", "local")
     monkeypatch.setenv("CALDERA_VAULT_PATH", str(vault_path))
     monkeypatch.setenv("CALDERA_API_KEYS", "test-key")
@@ -15,6 +16,8 @@ def _configure_env(monkeypatch, vault_path, *, read_only=False, max_note_bytes=N
     monkeypatch.setenv("CALDERA_READ_ONLY", "true" if read_only else "false")
     if max_note_bytes is not None:
         monkeypatch.setenv("CALDERA_MAX_NOTE_BYTES", str(max_note_bytes))
+    if semantic_fallback is not None:
+        monkeypatch.setenv("CALDERA_SEMANTIC_FALLBACK", "true" if semantic_fallback else "false")
     # Don't read a developer's local .env during tests.
     monkeypatch.setattr("caldera.config.Settings.model_config", dict(env_prefix="CALDERA_",
                         env_file=None, extra="ignore"))
@@ -173,10 +176,29 @@ def test_search_is_fuzzy_and_ranked(client):
     assert "match_type" in hits[0] and isinstance(hits[0]["score"], (int, float))
 
 
-def test_search_semantic_mode_disabled_returns_409(client):
-    r = client.get("/api/v1/search", params={"q": "anything", "mode": "semantic"})
+def test_search_semantic_mode_falls_back_to_keyword_by_default(client):
+    # Semantic disabled + fallback on (default) → keyword results, not an error.
+    r = client.get("/api/v1/search", params={"q": "calderra", "mode": "semantic"})
+    assert r.status_code == 200
+    hits = r.json()
+    assert hits and hits[0]["match_type"] != "semantic"  # served by keyword (m16)
+
+
+def test_search_semantic_disabled_without_fallback_returns_409(tmp_path, monkeypatch):
+    (tmp_path / "A.md").write_text("body", encoding="utf-8")
+    _configure_env(monkeypatch, tmp_path, semantic_fallback=False)
+    app = create_app()
+    with TestClient(app) as c:
+        _wait_ready(c)
+        r = c.get("/api/v1/search", params={"q": "x", "mode": "semantic"})
+        assert r.status_code == 409
+        assert r.json()["error"]["code"] == "semantic_disabled"
+
+
+def test_search_hybrid_unavailable(client):
+    r = client.get("/api/v1/search", params={"q": "x", "mode": "hybrid"})
     assert r.status_code == 409
-    assert r.json()["error"]["code"] == "semantic_disabled"
+    assert r.json()["error"]["code"] == "hybrid_unavailable"
 
 
 def test_search_status_reports_keyword_only(client):

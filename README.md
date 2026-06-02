@@ -29,6 +29,9 @@ same API, which commits and pushes them to git.
 - **Read-only mode**: a hard switch that rejects all mutations and never pushes.
 - **API-key auth** via `Authorization: Bearer <key>`.
 - **OpenAPI docs** at `/docs`.
+- **Search**: fuzzy keyword (always on, rapidfuzz) + opt-in **local semantic /
+  vector search** (fastembed ONNX, private — embeddings never leave the box). See
+  [`docs/SEARCH.md`](docs/SEARCH.md).
 - **MCP server** at `/mcp` (Streamable HTTP, same Bearer auth) — exposes the vault
   as tools (`get_note`, `search_notes`, `create_note`, …) and resources to MCP
   agents. Write tools are hidden in read-only mode. See [`docs/MCP.md`](docs/MCP.md).

@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     read_only: bool = False
     max_note_bytes: int = 5 * 1024 * 1024
     search_fuzzy_threshold: float = 60.0  # min keyword-search score 0–100 (SEARCH.md §7)
+    semantic_search: bool = False  # enable local vector search (opt-in, heavy)
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    semantic_fallback: bool = True  # fall back to keyword while disabled/warming
+    data_path: str = "/data"  # Caldera state OUTSIDE the vault (vectors.db)
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "info"

@@ -22,13 +22,16 @@ logger = logging.getLogger("caldera.sync")
 
 class SyncEngine:
     def __init__(self, vault: Vault, *, interval: int, debounce: float, max_wait: float,
-                 read_only: bool = False) -> None:
+                 read_only: bool = False, post_reindex=None) -> None:
         self.vault = vault
         self.source = vault.source
         self.interval = interval
         self.debounce = debounce
         self.max_wait = max_wait
         self.read_only = read_only
+        # Optional sync hook run AFTER the locked cycle (e.g. semantic embedding),
+        # so slow CPU work doesn't hold the vault lock against API writes.
+        self.post_reindex = post_reindex
 
         self._poke = asyncio.Event()
         self._stop_evt = asyncio.Event()
@@ -87,7 +90,10 @@ class SyncEngine:
             if push and not self.read_only:
                 await self.source.push()
             self.state = self.source.status().state
-            return result
+        # Run the post-reindex hook outside the lock (embedding is slow CPU work).
+        if self.post_reindex is not None:
+            await asyncio.to_thread(self.post_reindex)
+        return result
 
     # ── Loops ───────────────────────────────────────────────────────
     async def _flush_loop(self) -> None:

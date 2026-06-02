@@ -6,6 +6,7 @@ import asyncio
 import logging
 import secrets
 from contextlib import AsyncExitStack, asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
@@ -90,6 +91,28 @@ def _mount_mcp(app: FastAPI, settings: Settings):
     return mcp
 
 
+def _build_semantic(settings: Settings):
+    """Build the SemanticIndex if enabled. Returns None (and logs) on any failure
+    so semantic search is best-effort and never blocks startup (SEARCH.md §3.5)."""
+    if not settings.semantic_search:
+        return None
+    try:
+        from .core.embedding import FastEmbedEmbedder
+        from .core.semantic import SemanticIndex
+        from .core.vectorstore import SqliteVectorStore
+
+        embedder = FastEmbedEmbedder(settings.embedding_model)
+        store = SqliteVectorStore(
+            Path(settings.data_path) / "vectors.db",
+            model=embedder.model, dim=embedder.dim,
+        )
+        logger.info("semantic search enabled (model=%s dim=%d)", embedder.model, embedder.dim)
+        return SemanticIndex(embedder, store)
+    except Exception:
+        logger.exception("semantic search enable failed; continuing keyword-only")
+        return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings: Settings = get_settings()
@@ -108,12 +131,25 @@ async def lifespan(app: FastAPI):
     )
     app.state.vault = vault
 
+    semantic = _build_semantic(settings)
+    app.state.semantic = semantic
+
+    def _reconcile_semantic() -> None:
+        if semantic is None:
+            return
+        notes = {p: e.parsed.content for p, e in vault.index.notes.items()}
+        try:
+            semantic.reconcile(notes)
+        except Exception:  # pragma: no cover - keep sync alive
+            logger.exception("semantic reconcile failed")
+
     sync = SyncEngine(
         vault,
         interval=settings.sync_interval,
         debounce=settings.commit_debounce,
         max_wait=settings.commit_max_wait,
         read_only=settings.read_only,
+        post_reindex=_reconcile_semantic if semantic is not None else None,
     )
     vault.on_change = sync.note_changed  # writes arm the debounced flush
     app.state.sync = sync
@@ -128,6 +164,10 @@ async def lifespan(app: FastAPI):
             app.state.ready = True
             logger.info("vault ready: %d notes indexed", len(vault.index))
             sync.start()
+            if semantic is not None:
+                # Embed the existing vault in the background (readiness is NOT
+                # gated on embeddings, SEARCH.md §3.5).
+                asyncio.create_task(asyncio.to_thread(_reconcile_semantic))
         except Exception as exc:
             app.state.bootstrap_error = str(exc)  # surfaced via /readyz (review m14)
             logger.exception("vault bootstrap failed")
