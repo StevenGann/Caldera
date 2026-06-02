@@ -145,6 +145,18 @@ async def lifespan(app: FastAPI):
     _check_auth_config(settings)
     app.state.ready = False
 
+    # Advisory single-writer lock for git-backed, writable deployments (m13).
+    writer_lock = None
+    if settings.source != "local" and not settings.read_only:
+        from .core.lock import SingleWriterLock, WriterLockHeld
+
+        writer_lock = SingleWriterLock(Path(settings.data_path) / "writer.lock")
+        try:
+            writer_lock.acquire()
+        except WriterLockHeld as exc:
+            raise RuntimeError(str(exc)) from exc
+    app.state.writer_lock = writer_lock
+
     source = build_source(settings)
     vault = Vault(
         settings.vault_path,
@@ -173,6 +185,7 @@ async def lifespan(app: FastAPI):
         max_wait=settings.commit_max_wait,
         read_only=settings.read_only,
         post_reindex=_reconcile_semantic if semantic is not None else None,
+        heartbeat=writer_lock.heartbeat if writer_lock is not None else None,
     )
     vault.on_change = sync.note_changed  # writes arm the debounced flush
     app.state.sync = sync
@@ -207,6 +220,8 @@ async def lifespan(app: FastAPI):
         finally:
             boot.cancel()
             await sync.stop()
+            if writer_lock is not None:
+                writer_lock.release()
 
 
 def create_app() -> FastAPI:

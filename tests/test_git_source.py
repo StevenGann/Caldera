@@ -105,6 +105,21 @@ async def test_wedged_push_blocks_discard_of_unpushed_work(tmp_path, git_origin,
     assert "refusing" in (src.status().last_error or "")
 
 
+async def test_unpushed_recovery_ref_is_retried(tmp_path, git_origin):
+    src = await _ready(tmp_path, git_origin)
+    sha = src.repo.commit(src.branch).hexsha
+    ref = f"refs/caldera/discarded/test-{sha[:7]}"
+    src.repo.git.update_ref(ref, sha)
+    src._unpushed_refs = [ref]
+    src._status.last_discard = {"recovery_ref": ref, "recovery_ref_pushed": False, "commits": 1}
+
+    src._push_pending_refs()
+
+    assert src._unpushed_refs == []  # retried successfully
+    assert src._status.last_discard["recovery_ref_pushed"] is True
+    assert src.repo.git.ls_remote("origin", ref).strip()  # now on origin
+
+
 async def test_discard_ref_name_format(tmp_path, git_origin):
     src = await _ready(tmp_path, git_origin)
     ref = src._make_discard_ref("abc1234def5678")

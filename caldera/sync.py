@@ -22,7 +22,7 @@ logger = logging.getLogger("caldera.sync")
 
 class SyncEngine:
     def __init__(self, vault: Vault, *, interval: int, debounce: float, max_wait: float,
-                 read_only: bool = False, post_reindex=None) -> None:
+                 read_only: bool = False, post_reindex=None, heartbeat=None) -> None:
         self.vault = vault
         self.source = vault.source
         self.interval = interval
@@ -32,6 +32,7 @@ class SyncEngine:
         # Optional sync hook run AFTER the locked cycle (e.g. semantic embedding),
         # so slow CPU work doesn't hold the vault lock against API writes.
         self.post_reindex = post_reindex
+        self.heartbeat = heartbeat  # single-writer lock heartbeat (m13)
 
         self._poke = asyncio.Event()
         self._stop_evt = asyncio.Event()
@@ -93,6 +94,8 @@ class SyncEngine:
         # Run the post-reindex hook outside the lock (embedding is slow CPU work).
         if self.post_reindex is not None:
             await asyncio.to_thread(self.post_reindex)
+        if self.heartbeat is not None:
+            self.heartbeat()
         return result
 
     # ── Loops ───────────────────────────────────────────────────────

@@ -47,6 +47,7 @@ class GitSource(Source):
         self.push_wedged_after = push_wedged_after
         self._repo = None
         self._push_failures = 0
+        self._unpushed_refs: list[str] = []  # recovery refs not yet confirmed on origin (M2)
         self._status = SourceStatus(branch=branch)
 
     # ── Setup ───────────────────────────────────────────────────────
@@ -167,6 +168,7 @@ class GitSource(Source):
             return ReconcileResult(error=self._status.last_error)
 
         self._status.last_pull = datetime.now(timezone.utc)
+        self._push_pending_refs()  # retry any recovery refs not yet on origin (M2)
         behind, ahead = self._counts()
 
         if behind == 0:
@@ -203,23 +205,44 @@ class GitSource(Source):
 
         return self._discard_and_reset(remote_ref, behind)
 
-    def _discard_and_reset(self, remote_ref: str, behind: int) -> ReconcileResult:
+    def _try_push_ref(self, ref: str) -> bool:
         import git
 
+        try:
+            infos = self.repo.remotes.origin.push(f"{ref}:{ref}")
+        except git.GitCommandError:
+            return False
+        return bool(infos) and not any(
+            i.flags & (i.REJECTED | i.REMOTE_REJECTED | i.ERROR) for i in infos
+        )
+
+    def _push_pending_refs(self) -> None:
+        """Retry pushing recovery refs that didn't reach origin earlier (M2)."""
+        if not self._unpushed_refs:
+            return
+        still: list[str] = []
+        for ref in self._unpushed_refs:
+            if self._try_push_ref(ref):
+                if (self._status.last_discard
+                        and self._status.last_discard.get("recovery_ref") == ref):
+                    self._status.last_discard["recovery_ref_pushed"] = True
+                logger.info("pushed pending recovery ref %s", ref)
+            else:
+                still.append(ref)
+        self._unpushed_refs = still
+
+    def _discard_and_reset(self, remote_ref: str, behind: int) -> ReconcileResult:
         tip = self.repo.commit(self.branch).hexsha
         discarded = [c.hexsha for c in self.repo.iter_commits(f"{remote_ref}..{self.branch}")]
         ref = self._make_discard_ref(tip)
 
         # Save discarded tip to a create-only ref, then best-effort push it.
         self.repo.git.update_ref(ref, tip, "")  # empty oldvalue ⇒ must-not-exist
-        recovery_pushed = False
-        try:
-            infos = self.repo.remotes.origin.push(f"{ref}:{ref}")
-            recovery_pushed = bool(infos) and not any(
-                i.flags & (i.REJECTED | i.REMOTE_REJECTED | i.ERROR) for i in infos
-            )
-        except git.GitCommandError as exc:
-            logger.warning("recovery ref push failed (kept locally): %s", exc)
+        recovery_pushed = self._try_push_ref(ref)
+        if not recovery_pushed:
+            # Keep retrying on later reconciles until it reaches origin (M2).
+            self._unpushed_refs.append(ref)
+            logger.warning("recovery ref %s kept locally; will retry pushing", ref)
 
         self.repo.git.reset("--hard", remote_ref)
         self.repo.git.clean("-f", "-d")  # pinned flags (review m1); no -x
