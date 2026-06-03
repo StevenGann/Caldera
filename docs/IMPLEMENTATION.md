@@ -14,6 +14,7 @@
 | **1. Correctness foundations** | path normalization + collision detection, atomic writes, ETag/If-Match, note-size ceiling, ambiguous-basename resolution, global link re-resolution, doc↔code routing reconcile | ✅ core done (2 minors → P2) |
 | **2. Sync rework** | debounce flusher, origin-wins reconcile + discard refs, push-failure/wedged handling, graceful drain | 🔨 core done (tested) |
 | **CI/CD + test infra** | GitHub Actions (CI matrix + GHCR release), pytest-cov, offline git-origin harness | ✅ done |
+| **Webhook** | Signed `vault.updated` POST on external pull (echo-proof diff) | ✅ done (`webhook.py`, `docs/WEBHOOKS.md`) |
 | **3. Fuzzy search** | rapidfuzz scorer, `?mode=`, `/search/status` | ✅ keyword done (semantic → P5) |
 | **4. MCP server** | Streamable HTTP mount, tools/resources, Bearer middleware | ✅ done (semantic tool → P5) |
 | **5. Semantic search** | fastembed + vector store, opt-in | ✅ done (plain-sqlite store) |
@@ -44,7 +45,7 @@
 - [x] **debounce flusher** (`SyncEngine`) replaces per-write commit; bursts coalesce. Test `test_debounce_coalesces_burst_into_one_commit`.
 - [x] **M2** Recovery-ref retain-until-pushed: unpushed refs retried on later reconciles (`_push_pending_refs`); `recovery_ref_pushed` updated. Test `test_unpushed_recovery_ref_is_retried`.
 - [x] **M4** Crash-safe multi-file move: `move.journal` written before disk ops, completed-forward on boot via `Vault.recover_journal` (idempotent). `test_vault.py`.
-- [x] **m5** Path-set-change **detection** (`SyncEngine.on_paths_changed`, fires only on external set changes → suppresses push-echo). Test `test_external_path_change_fires_callback`. *Transport (`resources/list_changed`) deferred: FastMCP has no public server-push broadcast; hook logs, ready to wire.*
+- [x] **m5** External-change **detection** (`SyncEngine.on_external_change`, before/after index diff → added/removed/modified, echo-proof). Now drives the **outbound webhook** (`caldera/webhook.py`, `docs/WEBHOOKS.md`) — the agent-notification transport. Tests `test_external_change_fires_with_added_and_modified`, `test_agent_own_writes_do_not_fire_external_change`, `test_webhook.py`. *(MCP `resources/list_changed` push still deferred — no FastMCP broadcast API; webhook covers the use case.)*
 - [x] **m17** `docs/DEPLOYMENT.md` written; `deploy/k8s/` manifests (replicas:1, Recreate, two PVCs, ingress no-buffer); Dockerfile fixed + `[mcp]` extra.
 - [x] **m7** Auto-merge surfaced (`last_auto_merge`); WARNING logged. Test in `test_git_source.py`.
 - [x] **m13** Open-when-empty auth → opt-in `CALDERA_ALLOW_NO_AUTH` (else refuse to start) + weak-key warning; single-writer lockfile (`core/lock.py`). Tests `test_lock.py` + API refusal/opt-in.

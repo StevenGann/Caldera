@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     git_author_name: str = "Caldera"
     git_author_email: str = "caldera@localhost"
 
+    # ── Webhook (notify on external vault changes) ──────────────────
+    webhook_url: str | None = None  # POST a vault.updated event here on external change
+    webhook_secret: str | None = None  # HMAC-SHA256 signing key (X-Caldera-Signature)
+    webhook_timeout: float = 10.0
+
     @field_validator("api_keys", mode="before")
     @classmethod
     def _split_keys(cls, v: object) -> object:

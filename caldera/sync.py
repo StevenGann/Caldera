@@ -12,6 +12,7 @@ lock so it can't interleave with API writes (§7.1).
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -23,7 +24,7 @@ logger = logging.getLogger("caldera.sync")
 class SyncEngine:
     def __init__(self, vault: Vault, *, interval: int, debounce: float, max_wait: float,
                  read_only: bool = False, post_reindex=None, heartbeat=None,
-                 on_paths_changed=None) -> None:
+                 on_external_change=None) -> None:
         self.vault = vault
         self.source = vault.source
         self.interval = interval
@@ -34,11 +35,11 @@ class SyncEngine:
         # so slow CPU work doesn't hold the vault lock against API writes.
         self.post_reindex = post_reindex
         self.heartbeat = heartbeat  # single-writer lock heartbeat (m13)
-        # Fired (added, removed) when a reconcile changes the note path SET — i.e.
-        # external edits, not Caldera's own writes (suppresses push-echo). Drives
-        # MCP resources/list_changed (review m5).
-        self.on_paths_changed = on_paths_changed
-        self._known_paths: set[str] | None = None
+        # Fired with {added, removed, modified} note-path lists when a reconcile
+        # brings in EXTERNAL changes. Computed by diffing the index before/after
+        # the pull, so the agent's own writes (already in the "before" snapshot)
+        # never fire it — echo-proof. Drives the outbound webhook (and m5).
+        self.on_external_change = on_external_change
 
         self._poke = asyncio.Event()
         self._stop_evt = asyncio.Event()
@@ -50,9 +51,20 @@ class SyncEngine:
         self.state = "idle"
         self.next_poll: datetime | None = None
 
-    def seed_paths(self) -> None:
-        """Record the current note set as the baseline (call after boot reindex)."""
-        self._known_paths = set(self.vault.index.notes)
+    def _index_state(self) -> dict[str, str]:
+        """Snapshot {note_path -> content checksum} from the current index."""
+        return {
+            p: hashlib.sha256(e.parsed.raw.encode("utf-8")).hexdigest()
+            for p, e in self.vault.index.notes.items()
+        }
+
+    @staticmethod
+    def _diff(pre: dict[str, str], post: dict[str, str]) -> dict[str, list[str]]:
+        return {
+            "added": sorted(post.keys() - pre.keys()),
+            "removed": sorted(pre.keys() - post.keys()),
+            "modified": sorted(p for p in (pre.keys() & post.keys()) if pre[p] != post[p]),
+        }
 
     # ── Change notification (called by Vault after each write) ──────
     def note_changed(self, paths: list[str] | None = None) -> None:
@@ -91,30 +103,33 @@ class SyncEngine:
 
     # ── The one sync cycle both paths share ─────────────────────────
     async def sync_cycle(self, *, push: bool = True):
+        watch = self.on_external_change is not None
         async with self.vault._lock:
             n, self._changes, self._pending = self._changes, 0, False
             message = f"caldera: sync {n} change(s)" if n else "caldera: sync"
             await self.source.commit(message, [])  # commit-first (§5.4 step 0)
+            # Snapshot AFTER committing local writes but BEFORE the pull, so the
+            # agent's own changes are baselined and only external ones show up.
+            pre = self._index_state() if watch else {}
             result = await self.source.reconcile()
             if result.changed:
                 await asyncio.to_thread(self.vault.reindex)
+            post = self._index_state() if (watch and result.changed) else {}
             if push and not self.read_only:
                 await self.source.push()
             self.state = self.source.status().state
-        # Run the post-reindex hook outside the lock (embedding is slow CPU work).
+        # Run hooks outside the lock (embedding / webhook are slow I/O).
         if self.post_reindex is not None:
             await asyncio.to_thread(self.post_reindex)
         if self.heartbeat is not None:
             self.heartbeat()
-        if self.on_paths_changed is not None and result.changed:
-            new = set(self.vault.index.notes)
-            if self._known_paths is not None and new != self._known_paths:
-                added, removed = new - self._known_paths, self._known_paths - new
+        if watch and result.changed:
+            change = self._diff(pre, post)
+            if change["added"] or change["removed"] or change["modified"]:
                 try:
-                    self.on_paths_changed(added, removed)
+                    self.on_external_change(change)
                 except Exception:  # pragma: no cover
-                    logger.exception("on_paths_changed hook failed")
-            self._known_paths = new
+                    logger.exception("on_external_change hook failed")
         return result
 
     # ── Loops ───────────────────────────────────────────────────────

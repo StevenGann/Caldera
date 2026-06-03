@@ -69,20 +69,35 @@ async def test_external_commit_is_pulled_and_indexed(tmp_path, git_origin, push_
     assert vault.index.get("Ext.md") is not None
 
 
-async def test_external_path_change_fires_callback(tmp_path, git_origin, push_to_origin):
+async def test_external_change_fires_with_added_and_modified(tmp_path, git_origin, push_to_origin):
     vault, src, engine = await _stack(tmp_path, git_origin)
     events = []
-    engine.on_paths_changed = lambda added, removed: events.append((added, removed))
-    engine.seed_paths()
+    engine.on_external_change = events.append
 
     # No external change → no event.
     await engine.sync_cycle()
     assert events == []
 
-    # External commit adds a note → exactly one event naming the added path.
+    # External commit adds a note → event names it under "added".
     push_to_origin("Added.md", "# Added\n")
     await engine.sync_cycle()
-    assert events and "Added.md" in events[-1][0]
+    assert events and events[-1]["added"] == ["Added.md"]
+
+    # External edit to an existing note → "modified".
+    push_to_origin("Added.md", "# Added\n\nmore content\n")
+    await engine.sync_cycle()
+    assert events[-1]["modified"] == ["Added.md"]
+
+
+async def test_agent_own_writes_do_not_fire_external_change(tmp_path, git_origin):
+    vault, src, engine = await _stack(tmp_path, git_origin)
+    vault.on_change = engine.note_changed
+    events = []
+    engine.on_external_change = events.append
+
+    await vault.create("Mine.md", "I wrote this", None)
+    await engine.sync_cycle()  # commits + pushes the agent's own note
+    assert events == []  # the agent's own write is NOT an external change
 
 
 async def test_origin_wins_reconcile_updates_index(tmp_path, git_origin, push_to_origin):

@@ -289,3 +289,13 @@ the REST error codes (returned as the tool error message). Write tools are
 |-----|---------|
 | `caldera://note/{path}` | A note's raw Markdown |
 | `caldera://vault/status` | Vault & sync status (JSON) |
+
+---
+
+## 9. Webhooks (outbound)
+
+Caldera can **POST** a `vault.updated` event to `CALDERA_WEBHOOK_URL` when a pull
+brings in **external** changes (never the agent's own writes). The payload lists
+the `added`/`removed`/`modified` note paths and is HMAC-signed
+(`X-Caldera-Signature`). Full spec — payload, signature verification, delivery
+semantics — in [`WEBHOOKS.md`](WEBHOOKS.md).

@@ -27,6 +27,8 @@ same API, which commits and pushes them to git.
 - **Rich note view**: Markdown body + outgoing links + backlinks + tags + frontmatter.
 - **GitHub sync**: clone a private repo, poll for new commits, push Caldera's changes.
 - **Read-only mode**: a hard switch that rejects all mutations and never pushes.
+- **Webhooks**: notify an agent (signed `vault.updated` POST) when an external
+  pull changes the vault — never for the agent's own edits. See [`docs/WEBHOOKS.md`](docs/WEBHOOKS.md).
 - **API-key auth** via `Authorization: Bearer <key>`.
 - **OpenAPI docs** at `/docs`.
 - **Search**: fuzzy keyword (always on, rapidfuzz) + opt-in **local semantic /
@@ -86,6 +88,7 @@ Full reference in [`docs/API.md`](docs/API.md); interactive Swagger UI at `/docs
 | [`docs/DESIGN.md`](docs/DESIGN.md) | Authoritative design: data model, sync, conflict policy, concurrency, config. |
 | [`docs/SEARCH.md`](docs/SEARCH.md) | Keyword + semantic search design. |
 | [`docs/MCP.md`](docs/MCP.md) | MCP server design (tools, resources, auth). |
+| [`docs/WEBHOOKS.md`](docs/WEBHOOKS.md) | Outbound webhook: notify an agent when the vault changes externally. |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Build → GHCR → homelab k8s; single-writer constraints. |
 | [`docs/IMPLEMENTATION.md`](docs/IMPLEMENTATION.md) | Build-phase tracker + every review finding mapped to its test. |
 

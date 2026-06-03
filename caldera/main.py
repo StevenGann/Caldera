@@ -179,11 +179,23 @@ async def lifespan(app: FastAPI):
         except Exception:  # pragma: no cover - keep sync alive
             logger.exception("semantic reconcile failed")
 
-    def _notify_paths_changed(added, removed) -> None:
-        # The note set changed from an external edit. FastMCP currently has no
-        # public server→client broadcast for resources/list_changed (review m5);
-        # log it so it's observable and ready to wire when the SDK supports it.
-        logger.info("vault note set changed (external): +%d -%d", len(added), len(removed))
+    notifier = None
+    if settings.webhook_url:
+        from .webhook import WebhookNotifier
+
+        notifier = WebhookNotifier(
+            settings.webhook_url, secret=settings.webhook_secret,
+            timeout=settings.webhook_timeout,
+        )
+        logger.info("webhook enabled → %s", settings.webhook_url)
+
+    def _on_external_change(change: dict) -> None:
+        # An external pull changed the vault. Log it (also covers m5 detection)
+        # and POST a webhook so subscribed agents know to re-read.
+        logger.info("external vault change: +%d ~%d -%d", len(change["added"]),
+                    len(change["modified"]), len(change["removed"]))
+        if notifier is not None:
+            notifier.notify(change)
 
     sync = SyncEngine(
         vault,
@@ -193,7 +205,7 @@ async def lifespan(app: FastAPI):
         read_only=settings.read_only,
         post_reindex=_reconcile_semantic if semantic is not None else None,
         heartbeat=writer_lock.heartbeat if writer_lock is not None else None,
-        on_paths_changed=_notify_paths_changed,
+        on_external_change=_on_external_change,
     )
     vault.on_change = sync.note_changed  # writes arm the debounced flush
     app.state.sync = sync
@@ -209,7 +221,6 @@ async def lifespan(app: FastAPI):
                 await asyncio.to_thread(vault.recover_journal)  # finish interrupted move (M4)
             app.state.ready = True
             logger.info("vault ready: %d notes indexed", len(vault.index))
-            sync.seed_paths()  # baseline for external-change detection (m5)
             sync.start()
             if semantic is not None:
                 # Embed the existing vault in the background (readiness is NOT
