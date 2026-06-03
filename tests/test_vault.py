@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from caldera.core.vault import Vault
 from caldera.sources.local import LocalSource
@@ -47,3 +48,21 @@ async def test_recover_journal_completes_interrupted_move(tmp_path):
 async def test_recover_journal_noop_without_journal(tmp_path):
     vault = await _vault(tmp_path)
     assert vault.recover_journal() is False
+
+
+async def test_reindex_skips_note_with_invalid_frontmatter(tmp_path, caplog):
+    """One note with malformed YAML frontmatter must not abort the whole
+    reindex; it is skipped (and logged with its path), other notes still index."""
+    vault = await _vault(tmp_path)
+    (vault.root / "Good.md").write_text("---\ntitle: Good\n---\n# ok\n", encoding="utf-8")
+    # Unterminated flow sequence → yaml.YAMLError when frontmatter is parsed.
+    (vault.root / "Bad.md").write_text("---\ntags: [unterminated\n---\nbody\n", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING, logger="caldera.vault"):
+        vault.reindex()  # must NOT raise
+
+    notes = vault.list_notes()
+    assert "Good.md" in notes
+    assert "Bad.md" not in notes  # the bad note is skipped, not indexed
+    assert any("Bad.md" in r.getMessage() and "frontmatter" in r.getMessage()
+               for r in caplog.records)

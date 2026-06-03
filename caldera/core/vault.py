@@ -19,6 +19,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 import frontmatter
+import yaml
 
 from ..sources.base import Source
 from .index import Backlink, ResolvedLink, VaultIndex
@@ -159,7 +160,17 @@ class Vault:
             # for now the write-time guard prevents Caldera from creating them.
             try:
                 parsed[key] = parse_note(path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError):
+            except (OSError, UnicodeDecodeError) as exc:
+                logger.warning("reindex: skipping unreadable note %s: %s", rel, exc)
+                continue
+            except yaml.YAMLError as exc:
+                # A single note with malformed YAML frontmatter must NOT abort the
+                # whole reindex — that would crash vault bootstrap and leave the
+                # service permanently unready (/readyz 503). Skip just that note
+                # and log the path (the raw YAML error alone never names the file).
+                logger.warning(
+                    "reindex: skipping note with invalid frontmatter %s: %s", rel, exc
+                )
                 continue
         new_index = VaultIndex()
         new_index.rebuild(parsed)
