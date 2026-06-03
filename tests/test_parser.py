@@ -1,6 +1,14 @@
 from caldera.core.parser import parse_note
 
 
+def test_aliases_handles_scalar_list_and_malformed():
+    assert parse_note("---\naliases: Solo\n---\nx").aliases == ["Solo"]
+    assert parse_note("---\naliases: [A, B]\n---\nx").aliases == ["A", "B"]
+    # A malformed non-iterable alias must not raise.
+    assert parse_note("---\naliases: 42\n---\nx").aliases == ["42"]
+    assert parse_note("x").aliases == []
+
+
 def test_frontmatter_and_body_split():
     raw = "---\ntitle: Hello\ntags: [a, b]\n---\nBody text here.\n"
     p = parse_note(raw)

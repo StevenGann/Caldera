@@ -67,15 +67,27 @@ curl -H 'Authorization: Bearer dev' localhost:8000/api/v1/notes/Projects/Caldera
 | `PUT` | `/api/v1/notes/{path}` | built | Create-or-replace a note. |
 | `PATCH` | `/api/v1/notes/{path}` | built | Partial update (append body / merge frontmatter). |
 | `DELETE` | `/api/v1/notes/{path}` | built | Delete a note. |
-| `POST` | `/api/v1/notes/move` | built | Move/rename, optionally rewriting links. |
-| `GET` | `/api/v1/search?q=` | built (naive substring; fuzzy/semantic designed) | Search with snippets. |
+| `POST` | `/api/v1/notes/{path}/move` | built | Move/rename, optionally rewriting links. |
+| `GET` | `/api/v1/search?q=` | built | Fuzzy keyword search (`?mode=semantic` when enabled), ranked + snippets. |
 | `GET` | `/api/v1/tags`, `/tags/{tag}` | built | Tag index. |
 | `GET` | `/api/v1/graph` | built | Whole-vault link graph. |
 | `GET` | `/api/v1/vault`, `/vault/status` | built | Vault & sync status. |
 | `POST` | `/api/v1/vault/sync`, `/vault/reindex` | built | Trigger sync / reindex. |
 | `GET` | `/healthz`, `/readyz` | built | Liveness / readiness. |
 
-Full interactive docs at `/docs` once running.
+Full reference in [`docs/API.md`](docs/API.md); interactive Swagger UI at `/docs` once running.
+
+## Documentation
+
+| Doc | Contents |
+|-----|----------|
+| [`docs/API.md`](docs/API.md) | Complete REST + MCP reference — every endpoint, params, responses, errors, examples. |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Component map and Mermaid flow diagrams (write path, reconcile, search, concurrency). |
+| [`docs/DESIGN.md`](docs/DESIGN.md) | Authoritative design: data model, sync, conflict policy, concurrency, config. |
+| [`docs/SEARCH.md`](docs/SEARCH.md) | Keyword + semantic search design. |
+| [`docs/MCP.md`](docs/MCP.md) | MCP server design (tools, resources, auth). |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Build → GHCR → homelab k8s; single-writer constraints. |
+| [`docs/IMPLEMENTATION.md`](docs/IMPLEMENTATION.md) | Build-phase tracker + every review finding mapped to its test. |
 
 ## Development
 

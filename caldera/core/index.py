@@ -1,8 +1,19 @@
 """In-memory link/backlink/tag index over the vault working tree.
 
-The index is derived state: the on-disk working tree is the source of truth.
-It is rebuilt fully on boot and after a pull, and patched incrementally on
-single-note writes.
+The index is derived state: the on-disk working tree is the source of truth. It
+is rebuilt fully on boot and after a pull. A single-note write (``upsert``)
+re-parses just that file but then **re-resolves links globally**, because
+basename resolution is non-local — a new note can satisfy or orphan ``[[links]]``
+anywhere in the vault. The global recompute is simple and always correct at the
+single-agent scale; a targeted incremental patch is a deferred optimization for
+very large vaults (DESIGN §6).
+
+Data held:
+
+- ``notes``     — ``path -> NoteEntry`` (parsed note + its resolved outgoing links)
+- ``by_name``   — lowercased basename/alias -> ``[path, ...]`` for link resolution
+- ``backlinks`` — ``path -> [Backlink, ...]`` reverse edges, derived from outgoing
+- ``tags``      — ``tag -> {path, ...}``
 """
 
 from __future__ import annotations

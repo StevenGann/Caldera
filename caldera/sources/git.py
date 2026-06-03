@@ -81,7 +81,12 @@ class GitSource(Source):
         await asyncio.to_thread(self._commit_sync, message, paths)
 
     def _commit_sync(self, message: str, paths: list[str]) -> None:
-        self.repo.git.add("--all", "--", *paths) if paths else self.repo.git.add("--all")
+        # Stage the touched paths, or the whole tree when called with no paths
+        # (the debounced flush passes [] to coalesce a whole burst into one commit).
+        if paths:
+            self.repo.git.add("--all", "--", *paths)
+        else:
+            self.repo.git.add("--all")
         if not self.repo.is_dirty(untracked_files=True):
             return  # nothing staged actually changed
         self.repo.index.commit(message)

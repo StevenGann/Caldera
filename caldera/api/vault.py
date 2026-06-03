@@ -19,6 +19,7 @@ router = APIRouter(prefix="/api/v1/vault", tags=["vault"], dependencies=[Depends
 def vault_status(
     vault: Vault = Depends(get_vault), settings: Settings = Depends(get_settings)
 ) -> VaultStatus:
+    """Vault overview: source kind, branch, read-only flag, dirty flag, counts."""
     src = vault.source.status()
     return VaultStatus(
         source=settings.source,
@@ -34,6 +35,8 @@ def vault_status(
 def sync_status(
     vault: Vault = Depends(get_vault), sync: SyncEngine = Depends(get_sync)
 ) -> SyncStatus:
+    """Sync/durability status: ahead/behind, committed_unpushed, last discard/merge,
+    next poll, and the engine state (idle/push_wedged/conflict_blocked/…)."""
     src = vault.source.status()
     return SyncStatus(
         last_pull=src.last_pull,
@@ -55,6 +58,7 @@ async def trigger_sync(
     vault: Vault = Depends(get_vault),
     sync: SyncEngine = Depends(get_sync),
 ) -> SyncStatus:
+    """Trigger an immediate commit → reconcile → push cycle (push ignored if read-only)."""
     push = (body.push if body else True) and not vault.read_only
     await sync.sync_cycle(push=push)
     return sync_status(vault, sync)
@@ -64,5 +68,6 @@ async def trigger_sync(
 async def reindex(
     vault: Vault = Depends(get_vault), settings: Settings = Depends(get_settings)
 ) -> VaultStatus:
+    """Force a full re-parse of the working tree and rebuild the in-memory index."""
     await asyncio.to_thread(vault.reindex)
     return vault_status(vault, settings)

@@ -45,10 +45,16 @@ class ParsedNote:
 
     @property
     def aliases(self) -> list[str]:
+        """Frontmatter aliases as a list of strings (handles scalar or list, and
+        tolerates a malformed non-iterable value without raising)."""
         a = self.frontmatter.get("aliases") or self.frontmatter.get("alias")
         if a is None:
             return []
-        return [a] if isinstance(a, str) else [str(x) for x in a]
+        if isinstance(a, str):
+            return [a]
+        if isinstance(a, (list, tuple)):
+            return [str(x) for x in a]
+        return [str(a)]
 
 
 def _strip_code(text: str) -> str:

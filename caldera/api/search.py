@@ -62,6 +62,9 @@ def search(
     settings: Settings = Depends(get_settings),
     semantic=Depends(get_semantic),
 ) -> list[SearchHit]:
+    """Search notes. `mode=keyword` (default) is fuzzy; `mode=semantic` uses local
+    embeddings when enabled (else keyword fallback or 409). Returns ranked hits with
+    `score` and `match_type`."""
     if mode == "hybrid":
         # Hybrid fusion (Tier 3) is deferred; surface it honestly (not 501).
         raise HTTPException(
@@ -120,11 +123,13 @@ def search_status(
 
 @router.get("/tags", response_model=list[TagCount])
 def list_tags(vault: Vault = Depends(get_vault)) -> list[TagCount]:
+    """All tags with note counts (alphabetical)."""
     return [TagCount(tag=t, count=c) for t, c in vault.index.all_tags().items()]
 
 
 @router.get("/tags/{tag:path}", response_model=list[NoteStub])
 def notes_for_tag(tag: str, vault: Vault = Depends(get_vault)) -> list[NoteStub]:
+    """Notes carrying a given tag."""
     out = []
     for path in vault.index.notes_with_tag(tag):
         entry = vault.index.get(path)
@@ -135,6 +140,7 @@ def notes_for_tag(tag: str, vault: Vault = Depends(get_vault)) -> list[NoteStub]
 
 @router.get("/graph", response_model=Graph)
 def graph(vault: Vault = Depends(get_vault)) -> Graph:
+    """Whole-vault link graph: nodes (notes) and edges (resolved links)."""
     nodes = [GraphNode(path=e.path, name=e.name) for e in vault.index.notes.values()]
     edges: list[GraphEdge] = []
     for path, entry in vault.index.notes.items():

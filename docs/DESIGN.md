@@ -36,31 +36,21 @@ initial implementation fills in the framework and the most important paths.
 
 ## 2. High-level architecture
 
-```
-                    ┌─────────────────────────────────────────────┐
-                    │                  Caldera                     │
-   AI agent ──REST──▶  FastAPI app                                 │
-   (or MCP) ──MCP───▶    ├── auth (Bearer API keys)                │
-                    │    ├── /notes  /search  /tags  /vault        │
-                    │    │                                         │
-                    │    ▼                                         │
-                    │  Vault service ──── VaultIndex (links,       │
-                    │    │                 backlinks, tags cache)  │
-                    │    ▼                                         │
-                    │  Parser (frontmatter + link extraction)      │
-                    │    │                                         │
-                    │    ▼                                         │
-                    │  Working tree on disk  ◀── Sync loop ──┐     │
-                    └──────────────────────────────────│─────┴─────┘
-                                                        │
-                                              ┌─────────▼─────────┐
-                                              │  Source adapter   │
-                                              │  (GitHubSource)   │
-                                              └─────────┬─────────┘
-                                                        │ git pull/push
-                                              ┌─────────▼─────────┐
-                                              │ GitHub private repo│
-                                              └────────────────────┘
+> Full component map and flow diagrams (write path, reconcile, search,
+> concurrency) live in [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+```mermaid
+flowchart TB
+    A([AI agent]) -->|REST or MCP| AUTH["Auth (Bearer keys)"]
+    AUTH --> APP["FastAPI app<br/>/notes · /search · /tags · /vault · /mcp"]
+    APP --> VAULT["Vault service (async write-lock)"]
+    VAULT --> INDEX[("VaultIndex<br/>links · backlinks · tags")]
+    VAULT --> PARSER["Parser (frontmatter + links)"]
+    VAULT --> TREE[("Working tree on disk")]
+    VAULT -->|on_change| SYNC["Sync engine<br/>(debounced commit/push + reconcile)"]
+    SYNC --> SRC["Source adapter (GitHubSource)"]
+    SRC <-->|git pull/push| REPO[("GitHub private repo")]
+    SRC --- TREE
 ```
 
 Key components:

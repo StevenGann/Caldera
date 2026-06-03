@@ -31,6 +31,7 @@ def list_notes(
     limit: int = Query(100, ge=1, le=1000),
     cursor: int = Query(0, ge=0),
 ) -> list[NoteStub]:
+    """List notes as lightweight stubs (path, name, tags), filtered and paginated."""
     paths = vault.list_notes(folder=folder, tag=tag, q=q)
     window = paths[cursor : cursor + limit]
     out = []
@@ -45,6 +46,7 @@ def list_notes(
 # so that e.g. GET /notes/Foo/links isn't swallowed by the greedy path param.
 @router.get("/notes/{path:path}/links", response_model=list[Link])
 def note_links(path: str, vault: Vault = Depends(get_vault)) -> list[Link]:
+    """Outgoing links of a note (target is the resolved path, or null if unresolved)."""
     view = vault.view(path)
     return [
         Link(target=link.target, text=link.text, type=link.type, resolved=link.resolved)
@@ -54,6 +56,7 @@ def note_links(path: str, vault: Vault = Depends(get_vault)) -> list[Link]:
 
 @router.get("/notes/{path:path}/backlinks", response_model=list[Backlink])
 def note_backlinks(path: str, vault: Vault = Depends(get_vault)) -> list[Backlink]:
+    """Notes that link *to* this note."""
     view = vault.view(path)
     return [Backlink(path=b.path, text=b.text) for b in view.backlinks]
 
@@ -85,6 +88,9 @@ def get_note(
     vault: Vault = Depends(get_vault),
     format: str | None = Query(None, pattern="^(markdown|json)$"),
 ):
+    """Get a note with its full graph context (body, frontmatter, tags, links,
+    backlinks, checksum). Emits a strong `ETag`. `?format=markdown` returns the
+    raw file as `text/markdown`."""
     view = vault.view(path)
     etag = _etag(view.checksum)
     if format == "markdown":
@@ -99,6 +105,7 @@ def get_note(
 async def create_note(
     body: CreateNote, response: Response, vault: Vault = Depends(get_vault)
 ) -> Note:
+    """Create a note (fails `409` if it already exists or collides on case/Unicode)."""
     view = await vault.create(body.path, body.content, body.frontmatter)
     response.headers["ETag"] = _etag(view.checksum)
     return note_view_to_model(view)
@@ -113,6 +120,8 @@ async def replace_note(
     upsert: bool = Query(True),
     if_match: str | None = Header(default=None, alias="If-Match"),
 ) -> Note:
+    """Create-or-replace a note's full content. Honors `If-Match` (→412) /
+    `expected_checksum` (→409). `?upsert=false` requires the note to exist."""
     view = await vault.replace(
         path, body.content, body.frontmatter, body.expected_checksum,
         etag=_if_match_value(if_match), upsert=upsert,
@@ -129,6 +138,8 @@ async def patch_note(
     vault: Vault = Depends(get_vault),
     if_match: str | None = Header(default=None, alias="If-Match"),
 ) -> Note:
+    """Partial update: append to the body and/or merge/delete frontmatter keys
+    without rewriting the note. Honors `If-Match`/`expected_checksum`."""
     view = await vault.patch(
         path,
         content_append=body.content_append,
@@ -143,11 +154,14 @@ async def patch_note(
 
 @router.delete("/notes/{path:path}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_note(path: str, vault: Vault = Depends(get_vault)) -> Response:
+    """Delete a note. Returns 204 No Content."""
     await vault.delete(path)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/notes/{path:path}/move", response_model=Note)
 async def move_note(path: str, body: MoveNote, vault: Vault = Depends(get_vault)) -> Note:
+    """Move/rename a note (source is the URL path). Optionally rewrites referring
+    wikilinks across the vault."""
     view = await vault.move(path, body.to, update_links=body.update_links)
     return note_view_to_model(view)
