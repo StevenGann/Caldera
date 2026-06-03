@@ -25,11 +25,10 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
-
-      - name: Install dependencies
-        run: uv pip install --system -e '.[dev]'
+      - name: Create venv + install (avoid the externally-managed system Python)
+        run: |
+          uv venv --python ${{ matrix.python-version }}
+          uv pip install -e '.[dev]'
 
       - name: Configure git identity (for git-backed source tests)
         run: |
@@ -38,10 +37,10 @@ jobs:
           git config --global init.defaultBranch main
 
       - name: Lint (ruff)
-        run: ruff check caldera tests
+        run: uv run --no-sync ruff check caldera tests
 
       - name: Test (pytest + coverage)
-        run: pytest -q --cov=caldera --cov-report=term-missing --cov-report=xml
+        run: uv run --no-sync pytest -q --cov=caldera --cov-report=term-missing --cov-report=xml
 
       - name: Upload coverage artifact
         if: matrix.python-version == '3.12'
@@ -55,6 +54,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Buildx (needed for the gha cache backend)
+        uses: docker/setup-buildx-action@v3
       - name: Build image (no push) to validate the Dockerfile
         uses: docker/build-push-action@v6
         with:
