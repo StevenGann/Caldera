@@ -1,6 +1,8 @@
 name: Release
 
-# Build and publish the container image to GitHub Container Registry (GHCR).
+# Build and publish the multi-arch (linux/amd64,linux/arm64) container image to
+# GitHub Container Registry (GHCR). arm64 is required by the Hyperion Pi-5 k3s
+# cluster that consumes this image.
 # Triggers on a version tag (vX.Y.Z) or manual dispatch. main builds a :edge tag.
 on:
   push:
@@ -21,7 +23,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Buildx (needed for the gha cache backend)
+      - name: Set up QEMU (cross-build linux/arm64)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx (multi-arch + the gha cache backend)
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
@@ -48,6 +53,8 @@ jobs:
         with:
           context: .
           push: true
+          # Hyperion (the k3s consumer) is Raspberry Pi 5 arm64; keep amd64 too.
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
