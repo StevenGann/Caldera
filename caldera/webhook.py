@@ -74,7 +74,7 @@ class WebhookNotifier:
     async def deliver(self, change: dict[str, list[str]]) -> bool:
         event = build_event(change)
         body = json.dumps(event).encode("utf-8")
-        headers = {"Content-Type": "application/json", "X-Caldera-Event": EVENT}
+        headers = {"Content-Type": "application/json", "X-GitHub-Event": EVENT}
         if self.secret:
             sig = sign(body, self.secret)
             headers["X-Caldera-Signature"] = sig
