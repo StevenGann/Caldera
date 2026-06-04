@@ -76,7 +76,9 @@ class WebhookNotifier:
         body = json.dumps(event).encode("utf-8")
         headers = {"Content-Type": "application/json", "X-Caldera-Event": EVENT}
         if self.secret:
-            headers["X-Caldera-Signature"] = sign(body, self.secret)
+            sig = sign(body, self.secret)
+            headers["X-Caldera-Signature"] = sig
+            headers["X-Webhook-Signature"] = sig
 
         delay = 1.0
         async with httpx.AsyncClient(timeout=self.timeout) as client:

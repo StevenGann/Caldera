@@ -60,8 +60,9 @@ async def test_deliver_posts_signed_payload(monkeypatch):
     req = _FakeClient.last
     assert req["url"] == "https://hermes.example/hook"
     assert req["headers"]["X-Caldera-Event"] == "vault.updated"
-    # Signature matches the exact bytes sent.
+    # Both signature headers match the exact bytes sent.
     assert req["headers"]["X-Caldera-Signature"] == sign(req["content"], "key")
+    assert req["headers"]["X-Webhook-Signature"] == sign(req["content"], "key")
     payload = json.loads(req["content"])
     assert payload["added"] == ["N.md"]
 
