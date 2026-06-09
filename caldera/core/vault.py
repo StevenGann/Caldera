@@ -93,7 +93,7 @@ def _checksum(raw: str) -> str:
 class Vault:
     def __init__(self, root: str | Path, source: Source, *, read_only: bool = False,
                  max_note_bytes: int = DEFAULT_MAX_NOTE_BYTES,
-                 on_change=None, data_path: str | Path | None = None) -> None:
+                 on_change=None, emit=None, data_path: str | Path | None = None) -> None:
         self.root = Path(root).resolve()
         self.source = source
         self.read_only = read_only
@@ -104,6 +104,10 @@ class Vault:
         # paths. The sync engine uses it to arm the debounced commit/push flush
         # (DESIGN §5.3); commits are NOT made per write.
         self.on_change = on_change or (lambda paths: None)
+        # Called (synchronously) after each write with a list of structured
+        # change events (upsert/delete + checksum). Feeds the real-time event
+        # bus / SSE stream so sync clients learn of API writes immediately.
+        self.emit = emit or (lambda changes: None)
         self.index = VaultIndex()
         self._lock = asyncio.Lock()
 
@@ -191,6 +195,15 @@ class Vault:
             paths = [p for p in paths if ql in PurePosixPath(p).stem.lower()]
         return paths
 
+    def manifest(self, *, folder: str | None = None) -> list[dict[str, str]]:
+        """A {path, checksum} list of every note, for client full-reconciliation."""
+        out: list[dict[str, str]] = []
+        for p in self.list_notes(folder=folder):
+            entry = self.index.get(p)
+            if entry is not None:
+                out.append({"path": p, "checksum": _checksum(entry.parsed.raw)})
+        return out
+
     def view(self, path: str) -> NoteView:
         entry = self.index.get(path)
         if entry is None:
@@ -222,6 +235,12 @@ class Vault:
             raise NoteNotFound(path)
         return entry.parsed.raw
 
+    def checksum_for(self, path: str) -> str | None:
+        """The current checksum of a note, or None if it isn't in the index.
+        Used to attach checksums to externally-pulled change events."""
+        entry = self.index.get(path)
+        return _checksum(entry.parsed.raw) if entry is not None else None
+
     # ── Writes (serialized) ─────────────────────────────────────────
     def _guard_write(self) -> None:
         if self.read_only:
@@ -247,6 +266,7 @@ class Vault:
             atomic_write(abs_path, raw)
             self.index.upsert(rel, parse_note(raw))
             self.on_change([rel])
+            self._emit(upserts=[rel])
             return self.view(rel)
 
     async def replace(self, path: str, content: str, fm: dict[str, Any] | None,
@@ -268,6 +288,7 @@ class Vault:
             atomic_write(abs_path, raw)
             self.index.upsert(rel, parse_note(raw))
             self.on_change([rel])
+            self._emit(upserts=[rel])
             return self.view(rel)
 
     async def patch(self, path: str, *, content_append: str | None = None,
@@ -296,6 +317,7 @@ class Vault:
             atomic_write(self._abs(rel), raw)
             self.index.upsert(rel, parse_note(raw))
             self.on_change([rel])
+            self._emit(upserts=[rel])
             return self.view(rel)
 
     async def delete(self, path: str) -> None:
@@ -308,6 +330,7 @@ class Vault:
             self._abs(rel).unlink(missing_ok=True)
             self.index.remove(rel)
             self.on_change([rel])
+            self._emit(deletes=[rel])
 
     async def move(self, path: str, to: str, *, update_links: bool = True) -> NoteView:
         self._guard_write()
@@ -336,6 +359,8 @@ class Vault:
                 touched += self._rewrite_links(old_name=entry.name, new_path=dst)
                 self._clear_journal()
             self.on_change(touched)
+            # src removed; dst plus any link-rewritten notes upserted.
+            self._emit(upserts=[dst, *touched[2:]], deletes=[src])
             return self.view(dst)
 
     # ── Move journal (crash-safe link rewrites, M4) ─────────────────
@@ -372,6 +397,23 @@ class Vault:
         return True
 
     # ── Internal helpers ────────────────────────────────────────────
+    def _emit(self, *, upserts: list[str] = (), deletes: list[str] = (),
+              origin: str = "api") -> None:
+        """Publish change events for a completed write. Checksums for upserts are
+        read from the (already-updated) index so they match what the API serves."""
+        events: list[dict[str, Any]] = [
+            {"type": "delete", "path": p, "origin": origin} for p in deletes
+        ]
+        for p in upserts:
+            entry = self.index.get(p)
+            if entry is not None:
+                events.append({
+                    "type": "upsert", "path": p,
+                    "checksum": _checksum(entry.parsed.raw), "origin": origin,
+                })
+        if events:
+            self.emit(events)
+
     def _check(self, rel: str, expected: str | None = None, etag: str | None = None) -> None:
         """Optimistic-concurrency gate. `etag` (from `If-Match`) fails with 412;
         body `expected` fails with 409. Header is checked first."""

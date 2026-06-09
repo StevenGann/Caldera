@@ -15,10 +15,11 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__
-from .api import health, notes, search, vault as vault_api
+from .api import events as events_api, health, notes, search, vault as vault_api
 from .config import Settings, get_settings
 from .core import vault as vault_core
 from .core.vault import Vault
+from .events import EventBus, changes_from_diff
 from .sources import build_source
 from .sync import SyncEngine
 
@@ -157,6 +158,11 @@ async def lifespan(app: FastAPI):
             raise RuntimeError(str(exc)) from exc
     app.state.writer_lock = writer_lock
 
+    # Real-time change bus: API writes and external pulls publish here; the
+    # SSE /events stream and polled /changes endpoint read from it.
+    events = EventBus(buffer_size=settings.events_buffer_size)
+    app.state.events = events
+
     source = build_source(settings)
     vault = Vault(
         settings.vault_path,
@@ -164,6 +170,7 @@ async def lifespan(app: FastAPI):
         read_only=settings.read_only,
         max_note_bytes=settings.max_note_bytes,
         data_path=settings.data_path,
+        emit=events.publish,  # API writes → change stream
     )
     app.state.vault = vault
 
@@ -190,10 +197,12 @@ async def lifespan(app: FastAPI):
         logger.info("webhook enabled → %s", settings.webhook_url)
 
     def _on_external_change(change: dict) -> None:
-        # An external pull changed the vault. Log it (also covers m5 detection)
-        # and POST a webhook so subscribed agents know to re-read.
+        # An external pull changed the vault. Log it (also covers m5 detection),
+        # publish to the change stream so sync clients re-read immediately, and
+        # POST a webhook so subscribed agents know to re-read.
         logger.info("external vault change: +%d ~%d -%d", len(change["added"]),
                     len(change["modified"]), len(change["removed"]))
+        events.publish(changes_from_diff(change, vault.checksum_for))
         if notifier is not None:
             notifier.notify(change)
 
@@ -304,6 +313,7 @@ def create_app() -> FastAPI:
     app.include_router(notes.router)
     app.include_router(search.router)
     app.include_router(vault_api.router)
+    app.include_router(events_api.router)
 
     # Mount the MCP server (shares the vault; tools/resources over Streamable HTTP).
     app.state.mcp = _mount_mcp(app, get_settings())

@@ -120,6 +120,44 @@ class SyncRequest(BaseModel):
     push: bool = Field(True, description="Also push pending local commits (ignored if read-only).")
 
 
+# ─── Real-time change stream ───────────────────────────────────────────
+class ChangeEvent(BaseModel):
+    """A single vault change, as delivered over SSE (`/events`) or polled
+    (`/changes`)."""
+
+    seq: int = Field(..., description="Monotonic sequence number of this change.")
+    ts: str = Field(..., description="ISO-8601 timestamp the change was published.")
+    type: Literal["upsert", "delete", "resync"] = Field(
+        ..., description="upsert/delete a note; 'resync' tells the client to reload the manifest."
+    )
+    path: str | None = Field(None, description="Note path (null for a 'resync' sentinel).")
+    checksum: str | None = Field(None, description="New checksum for an upsert; null otherwise.")
+    origin: Literal["api", "external"] = Field(
+        "api", description="'api' = a write through this server; 'external' = pulled from origin."
+    )
+
+
+class ChangesResponse(BaseModel):
+    head: int = Field(..., description="Sequence number of the latest change on the server.")
+    floor: int = Field(..., description="Oldest sequence still replayable from the buffer.")
+    resync: bool = Field(
+        False, description="True if `since` fell behind the buffer; reload the manifest."
+    )
+    events: list[ChangeEvent] = []
+
+
+class ManifestEntry(BaseModel):
+    path: str
+    checksum: str
+
+
+class ManifestResponse(BaseModel):
+    head: int = Field(
+        ..., description="Stream sequence at snapshot time; subscribe with `?since=<head>`."
+    )
+    notes: list[ManifestEntry] = []
+
+
 # ─── Errors ────────────────────────────────────────────────────────────
 class ErrorBody(BaseModel):
     code: str

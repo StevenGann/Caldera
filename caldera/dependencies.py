@@ -25,6 +25,11 @@ def get_sync(request: Request) -> SyncEngine:
     return request.app.state.sync
 
 
+def get_events(request: Request):
+    """The in-process EventBus backing the real-time change stream."""
+    return request.app.state.events
+
+
 def get_semantic(request: Request):
     """The SemanticIndex if semantic search is enabled and built, else None."""
     return getattr(request.app.state, "semantic", None)

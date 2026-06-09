@@ -247,6 +247,29 @@ Forces a full re-parse of the working tree. **200** → `VaultStatus`.
 
 ---
 
+## 6a. Real-time change stream
+
+A live feed of every vault change (API writes *and* external pulls), for clients
+that mirror the vault — e.g. the Caldera-Sync Obsidian plugin. Full design in
+[`REALTIME_SYNC.md`](REALTIME_SYNC.md). All require Bearer auth.
+
+### `GET /api/v1/manifest` — reconciliation snapshot
+Optional `?folder=`. **200** → `{ "head": N, "notes": [ { "path", "checksum" } ] }`.
+`head` is the stream sequence to subscribe from.
+
+### `GET /api/v1/events` — SSE stream
+`text/event-stream`. Optional `?since=<seq>` replays buffered changes (or a
+`resync` sentinel) before going live. Each frame: `data: <ChangeEvent JSON>`.
+Consume with `fetch` (so the `Authorization` header can be sent), not `EventSource`.
+
+### `GET /api/v1/changes` — poll fallback
+`?since=<seq>&limit=`. **200** → `{ "head", "floor", "resync": bool, "events": [ChangeEvent] }`.
+`resync: true` means `since` fell behind the buffer — reload the manifest.
+
+A `ChangeEvent` is `{ seq, ts, type: upsert|delete|resync, path, checksum, origin: api|external }`.
+
+---
+
 ## 7. Operational (no auth)
 
 | Method | Path | Response |

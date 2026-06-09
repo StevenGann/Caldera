@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     webhook_secret: str | None = None  # HMAC-SHA256 signing key (X-Caldera-Signature)
     webhook_timeout: float = 10.0
 
+    # ── Real-time change stream (SSE /events, poll /changes) ────────
+    events_buffer_size: int = 1000  # recent changes retained for replay/catch-up
+    events_keepalive: float = 25.0  # seconds between SSE keepalive comments
+
     @field_validator("api_keys", mode="before")
     @classmethod
     def _split_keys(cls, v: object) -> object:
