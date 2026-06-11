@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__
-from .api import events as events_api, health, notes, search, vault as vault_api
+from .api import events as events_api, changes, health, notes, search, vault as vault_api
 from .config import Settings, get_settings
 from .core import vault as vault_core
 from .core.vault import Vault
@@ -345,6 +345,7 @@ def create_app() -> FastAPI:
     app.include_router(notes.router)
     app.include_router(search.router)
     app.include_router(vault_api.router)
+    app.include_router(changes.router)
     app.include_router(events_api.router)
 
     # Mount the MCP server (shares the vault; tools/resources over Streamable HTTP).

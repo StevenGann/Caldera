@@ -129,12 +129,12 @@ def test_manifest_has_head_and_checksums(client):
 
 
 def test_create_emits_api_upsert_event(client):
-    base = client.get("/api/v1/changes?since=0").json()["head"]
+    base = client.get("/api/v1/events-buffer?since=0").json()["head"]
     r = client.post("/api/v1/notes", json={"path": "New.md", "content": "# New\n"})
     assert r.status_code == 201
     expected_checksum = r.headers["ETag"].strip('"')
 
-    body = client.get(f"/api/v1/changes?since={base}").json()
+    body = client.get(f"/api/v1/events-buffer?since={base}").json()
     assert body["resync"] is False
     upserts = [e for e in body["events"] if e["path"] == "New.md"]
     assert len(upserts) == 1
@@ -146,9 +146,9 @@ def test_create_emits_api_upsert_event(client):
 
 def test_delete_emits_delete_event(client):
     client.put("/api/v1/notes/Doomed.md", json={"content": "x"})
-    base = client.get("/api/v1/changes?since=0").json()["head"]
+    base = client.get("/api/v1/events-buffer?since=0").json()["head"]
     client.delete("/api/v1/notes/Doomed.md")
-    body = client.get(f"/api/v1/changes?since={base}").json()
+    body = client.get(f"/api/v1/events-buffer?since={base}").json()
     dels = [e for e in body["events"] if e["path"] == "Doomed.md" and e["type"] == "delete"]
     assert len(dels) == 1
 
@@ -166,7 +166,7 @@ async def test_event_stream_resync_when_cursor_ahead_of_head():
 
 def test_changes_resync_when_cursor_ahead_of_head(client):
     # A stale high cursor (from before a restart) must be told to resync.
-    body = client.get("/api/v1/changes?since=99999").json()
+    body = client.get("/api/v1/events-buffer?since=99999").json()
     assert body["resync"] is True
     assert body["events"] == []
 
@@ -175,7 +175,7 @@ def test_changes_resync_when_behind_buffer(tmp_path, monkeypatch):
     with _make_client(tmp_path, monkeypatch, buffer_size=2) as c:
         for i in range(4):
             c.put(f"/api/v1/notes/N{i}.md", json={"content": f"{i}"})
-        body = c.get("/api/v1/changes?since=1").json()
+        body = c.get("/api/v1/events-buffer?since=1").json()
         # Buffer holds only the last 2 events, so since=1 fell behind.
         assert body["resync"] is True
         assert body["events"] == []

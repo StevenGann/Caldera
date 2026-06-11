@@ -92,8 +92,8 @@ def manifest(
     return ManifestResponse(head=head, notes=notes)
 
 
-@router.get("/changes", response_model=ChangesResponse)
-def changes(
+@router.get("/events-buffer", response_model=ChangesResponse)
+def events_buffer(
     events: EventBus = Depends(get_events),
     since: int = Query(0, ge=0, description="Return changes with seq greater than this."),
     limit: int = Query(500, ge=1, le=2000),
