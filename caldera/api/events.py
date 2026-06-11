@@ -47,9 +47,14 @@ async def event_stream(events: EventBus, *, since: int | None = None,
     try:
         last = since or 0
         if since is not None:
-            # Resync only if the first event the client still needs (since+1)
-            # has already been evicted from the buffer (floor > since+1).
-            if events.floor > 0 and since < events.floor - 1:
+            # Tell the client to resync (reload the manifest, reset its cursor) when
+            # its cursor can't be served from this bus:
+            #   - since > head: the cursor is from a previous bus generation — the
+            #     server restarted and the in-memory seq reset. Without this the
+            #     client waits forever for seq numbers it will never see (live sync
+            #     silently stalls until a manual reconcile).
+            #   - since < floor-1: the events it still needs were evicted.
+            if since > events.head or (events.floor > 0 and since < events.floor - 1):
                 last = events.head
                 yield _sse({"type": "resync", "seq": events.head, "head": events.head})
             else:
@@ -97,8 +102,9 @@ def changes(
 
     If ``since`` precedes the replay buffer, ``resync`` is set and the client
     should reload the manifest instead of trusting the (incomplete) event list."""
-    # Resync only if events after `since` were evicted (floor > since + 1).
-    resync = events.floor > 0 and since < events.floor - 1
+    # Resync if the cursor is from a previous bus generation (since > head, e.g.
+    # after a restart reset the in-memory seq) or its events were evicted.
+    resync = since > events.head or (events.floor > 0 and since < events.floor - 1)
     evs = [] if resync else [ChangeEvent(**e) for e in events.replay(since, limit=limit)]
     return ChangesResponse(head=events.head, floor=events.floor, resync=resync, events=evs)
 

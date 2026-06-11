@@ -153,6 +153,24 @@ def test_delete_emits_delete_event(client):
     assert len(dels) == 1
 
 
+async def test_event_stream_resync_when_cursor_ahead_of_head():
+    # Simulates a server restart: the client's persisted cursor (92) outlives the
+    # in-memory bus, which reset and only climbed to 1. Must resync, not stall.
+    bus = EventBus()
+    bus.publish([{"type": "upsert", "path": "A.md", "checksum": "x"}])  # head = 1
+    gen = event_stream(bus, since=92, keepalive=5)
+    frame = await asyncio.wait_for(gen.__anext__(), timeout=1)
+    assert _data(frame)["type"] == "resync"
+    await gen.aclose()
+
+
+def test_changes_resync_when_cursor_ahead_of_head(client):
+    # A stale high cursor (from before a restart) must be told to resync.
+    body = client.get("/api/v1/changes?since=99999").json()
+    assert body["resync"] is True
+    assert body["events"] == []
+
+
 def test_changes_resync_when_behind_buffer(tmp_path, monkeypatch):
     with _make_client(tmp_path, monkeypatch, buffer_size=2) as c:
         for i in range(4):
