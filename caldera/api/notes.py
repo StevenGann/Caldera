@@ -10,7 +10,6 @@ from ..dependencies import get_vault, require_api_key
 from ..core import vault as vault_core
 from ..models import (
     Backlink,
-    BatchOperation,
     BatchRequest,
     BatchResponse,
     BatchResult,
