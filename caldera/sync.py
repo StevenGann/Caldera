@@ -24,7 +24,7 @@ logger = logging.getLogger("caldera.sync")
 class SyncEngine:
     def __init__(self, vault: Vault, *, interval: int, debounce: float, max_wait: float,
                  read_only: bool = False, post_reindex=None, heartbeat=None,
-                 on_external_change=None) -> None:
+                 on_external_change=None, on_agent_change=None) -> None:
         self.vault = vault
         self.source = vault.source
         self.interval = interval
@@ -40,6 +40,11 @@ class SyncEngine:
         # the pull, so the agent's own writes (already in the "before" snapshot)
         # never fire it — echo-proof. Drives the outbound webhook (and m5).
         self.on_external_change = on_external_change
+        # Fired with the same shape after agent-initiated writes are committed
+        # to the working tree. Changes are classified by checking the current
+        # index state when the flush fires. Drives the outbound webhook for
+        # real-time agent-change notification.
+        self.on_agent_change = on_agent_change
 
         self._poke = asyncio.Event()
         self._stop_evt = asyncio.Event()
@@ -47,6 +52,7 @@ class SyncEngine:
         self._changes = 0
         self._first = 0.0
         self._last = 0.0
+        self._dirty_paths: set[str] = set()
         self._tasks: list[asyncio.Task] = []
         self.state = "idle"
         self.next_poll: datetime | None = None
@@ -66,6 +72,26 @@ class SyncEngine:
             "modified": sorted(p for p in (pre.keys() & post.keys()) if pre[p] != post[p]),
         }
 
+    def _classify_agent_change(self) -> dict[str, list[str]]:
+        """Classify dirty paths as added/modified/removed by checking the current
+        index. Paths that exist in the index are "modified"; paths that don't are
+        "removed". No path can be "added" here because agent creates go through
+        the index immediately — but we keep the key for payload compatibility."""
+        added: list[str] = []
+        modified: list[str] = []
+        removed: list[str] = []
+        current = set(self.vault.index.notes.keys())
+        for p in self._dirty_paths:
+            if p in current:
+                modified.append(p)
+            else:
+                removed.append(p)
+        return {
+            "added": sorted(added),
+            "removed": sorted(removed),
+            "modified": sorted(modified),
+        }
+
     # ── Change notification (called by Vault after each write) ──────
     def note_changed(self, paths: list[str] | None = None) -> None:
         now = asyncio.get_running_loop().time()
@@ -74,6 +100,8 @@ class SyncEngine:
             self._first = now
         self._last = now
         self._changes += 1
+        if paths:
+            self._dirty_paths.update(paths)
         self._poke.set()
 
     # ── Lifecycle ───────────────────────────────────────────────────
@@ -104,10 +132,20 @@ class SyncEngine:
     # ── The one sync cycle both paths share ─────────────────────────
     async def sync_cycle(self, *, push: bool = True):
         watch = self.on_external_change is not None
+        notify_agent = self.on_agent_change is not None
         async with self.vault._lock:
             n, self._changes, self._pending = self._changes, 0, False
             message = f"caldera: sync {n} change(s)" if n else "caldera: sync"
             await self.source.commit(message, [])  # commit-first (§5.4 step 0)
+            # ── Fire agent-change callback for local writes ──────────
+            if notify_agent and n > 0 and self._dirty_paths:
+                agent_change = self._classify_agent_change()
+                self._dirty_paths.clear()
+                if agent_change["added"] or agent_change["removed"] or agent_change["modified"]:
+                    try:
+                        self.on_agent_change(agent_change)
+                    except Exception:  # pragma: no cover
+                        logger.exception("on_agent_change hook failed")
             # Snapshot AFTER committing local writes but BEFORE the pull, so the
             # agent's own changes are baselined and only external ones show up.
             pre = self._index_state() if watch else {}

@@ -204,7 +204,15 @@ async def lifespan(app: FastAPI):
                     len(change["modified"]), len(change["removed"]))
         events.publish(changes_from_diff(change, vault.checksum_for))
         if notifier is not None:
-            notifier.notify(change)
+            notifier.notify(change, source="external")
+
+    def _on_agent_change(change: dict) -> None:
+        # Agent writes were committed to the working tree. POST a webhook so
+        # subscribed agents can review and act on the changes in real time.
+        logger.info("agent vault change: +%d ~%d -%d", len(change["added"]),
+                    len(change["modified"]), len(change["removed"]))
+        if notifier is not None:
+            notifier.notify(change, source="agent")
 
     sync = SyncEngine(
         vault,
@@ -215,6 +223,7 @@ async def lifespan(app: FastAPI):
         post_reindex=_reconcile_semantic if semantic is not None else None,
         heartbeat=writer_lock.heartbeat if writer_lock is not None else None,
         on_external_change=_on_external_change,
+        on_agent_change=_on_agent_change,
     )
     vault.on_change = sync.note_changed  # writes arm the debounced flush
     app.state.sync = sync

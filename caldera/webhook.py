@@ -1,17 +1,18 @@
-"""Outbound webhook: notify a subscriber (e.g. an agent) when the vault changes
-from an **external** source — a fresh pull/reconcile from origin.
+"""Outbound webhook: notify a subscriber (e.g. an agent) when the vault changes.
 
-The sync engine computes *which* notes changed (added / removed / modified) by
-diffing the index before and after a reconcile, so the agent's own writes never
-trigger a notification (they're already in the "before" snapshot). Delivery is
-async, best-effort, and retried with backoff so a slow/down subscriber never
-blocks syncing.
+Two change sources are supported:
+
+* **external** — changes from a fresh pull/reconcile from origin. Computed by
+  diffing the index before and after the pull.
+
+* **agent** — changes written through the Caldera API (REST or MCP). Fires after
+  the debounced commit flush.
 
 Payload (POST, ``application/json``)::
 
     {
       "event": "vault.updated",
-      "source": "external",
+      "source": "external" | "agent",
       "at": "2026-06-03T00:00:00+00:00",
       "added":    ["New/Note.md"],
       "removed":  ["Old/Gone.md"],
@@ -21,7 +22,7 @@ Payload (POST, ``application/json``)::
 
 If a secret is configured, the request carries
 ``X-Caldera-Signature: sha256=<hex hmac of the raw body>`` so the receiver can
-verify authenticity (GitHub-style). ``X-Caldera-Event: vault.updated`` is always set.
+verify authenticity. ``X-Caldera-Event: vault.updated`` is always set.
 """
 
 from __future__ import annotations
@@ -41,13 +42,16 @@ logger = logging.getLogger("caldera.webhook")
 EVENT = "vault.updated"
 
 
-def build_event(change: dict[str, list[str]], *, at: datetime | None = None) -> dict[str, Any]:
-    """Construct the webhook payload from a {added, removed, modified} change."""
+def build_event(change: dict[str, list[str]], *, at: datetime | None = None,
+                source: str = "external") -> dict[str, Any]:
+    """Construct the webhook payload from a {added, removed, modified} change.
+    
+    source: 'external' for changes from git pull, 'agent' for API-initiated writes."""
     at = at or datetime.now(timezone.utc)
     keys = ("added", "removed", "modified")
     return {
         "event": EVENT,
-        "source": "external",
+        "source": source,
         "at": at.isoformat(),
         **{k: change.get(k, []) for k in keys},
         "counts": {k: len(change.get(k, [])) for k in keys},
@@ -67,12 +71,12 @@ class WebhookNotifier:
         self.timeout = timeout
         self.retries = retries
 
-    def notify(self, change: dict[str, list[str]]) -> None:
+    def notify(self, change: dict[str, list[str]], *, source: str = "external") -> None:
         """Fire-and-forget: schedule delivery without blocking the caller."""
-        asyncio.create_task(self.deliver(change))
+        asyncio.create_task(self.deliver(change, source=source))
 
-    async def deliver(self, change: dict[str, list[str]]) -> bool:
-        event = build_event(change)
+    async def deliver(self, change: dict[str, list[str]], *, source: str = "external") -> bool:
+        event = build_event(change, source=source)
         body = json.dumps(event).encode("utf-8")
         headers = {"Content-Type": "application/json", "X-GitHub-Event": EVENT}
         if self.secret:
