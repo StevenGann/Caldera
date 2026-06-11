@@ -101,6 +101,23 @@ def client(tmp_path, monkeypatch):
         yield c
 
 
+def test_cors_allows_obsidian_origin(client):
+    # Preflight for the SSE stream from Obsidian's renderer origin.
+    r = client.options(
+        "/api/v1/events",
+        headers={
+            "Origin": "app://obsidian.md",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+    assert r.status_code in (200, 204)
+    assert r.headers.get("access-control-allow-origin") == "app://obsidian.md"
+    # The actual cross-origin request carries the allow-origin header too.
+    r2 = client.get("/api/v1/manifest", headers={"Origin": "app://obsidian.md"})
+    assert r2.headers.get("access-control-allow-origin") == "app://obsidian.md"
+
+
 def test_manifest_has_head_and_checksums(client):
     r = client.get("/api/v1/manifest")
     assert r.status_code == 200

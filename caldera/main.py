@@ -318,6 +318,20 @@ def create_app() -> FastAPI:
             }},
         )
 
+    # CORS so browser clients (the Obsidian plugin's SSE stream, which runs in
+    # the renderer and is CORS-checked) can reach the API. Bearer auth remains
+    # the security boundary; CORS just unblocks the cross-origin fetch.
+    from fastapi.middleware.cors import CORSMiddleware
+
+    cors_origins = get_settings().cors_origins
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["ETag"],
+    )
+
     app.include_router(health.router)
     app.include_router(notes.router)
     app.include_router(search.router)

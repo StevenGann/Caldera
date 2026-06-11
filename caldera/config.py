@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     port: int = 8000
     log_level: str = "info"
     mcp_enabled: bool = True  # mount the MCP server at /mcp (MCP.md)
+    # CORS: browser clients (the Obsidian plugin's SSE stream runs in the
+    # renderer at app://obsidian.md and is CORS-checked). Defaults cover Obsidian
+    # desktop + mobile; set "*" to allow any origin, or a comma-separated list.
+    cors_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["app://obsidian.md", "capacitor://localhost", "http://localhost"]
+    )
 
     # ── Vault source ────────────────────────────────────────────────
     source: Literal["github", "local"] = "github"
@@ -63,7 +69,7 @@ class Settings(BaseSettings):
     events_buffer_size: int = 1000  # recent changes retained for replay/catch-up
     events_keepalive: float = 25.0  # seconds between SSE keepalive comments
 
-    @field_validator("api_keys", mode="before")
+    @field_validator("api_keys", "cors_origins", mode="before")
     @classmethod
     def _split_keys(cls, v: object) -> object:
         """Accept a comma-separated string from the environment."""
