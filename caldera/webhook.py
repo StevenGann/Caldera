@@ -83,6 +83,7 @@ class WebhookNotifier:
             sig = sign(body, self.secret)
             headers["X-Caldera-Signature"] = sig
             headers["X-Webhook-Signature"] = sig
+            headers["X-Hub-Signature-256"] = sig  # Hermes-compatible (GitHub format)
 
         delay = 1.0
         async with httpx.AsyncClient(timeout=self.timeout) as client:
