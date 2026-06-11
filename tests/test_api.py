@@ -254,3 +254,121 @@ def test_error_envelope_is_consistent_across_error_kinds(client):
 
     r = client.get("/api/v1/notes/Nope.md")
     assert r.status_code == 404 and r.json()["error"]["code"] == "not_found"
+
+
+def test_batch_create_multiple(client):
+    r = client.post("/api/v1/notes/batch", json={
+        "operations": [
+            {"action": "create", "path": "Batch/A.md", "content": "Alpha"},
+            {"action": "create", "path": "Batch/B.md", "content": "Beta"},
+            {"action": "create", "path": "Batch/C.md", "content": "Gamma"},
+        ]
+    })
+    assert r.status_code == 200
+    results = r.json()["results"]
+    assert len(results) == 3
+    assert all(rr["status"] == "ok" for rr in results)
+    assert {rr["path"] for rr in results} == {"Batch/A.md", "Batch/B.md", "Batch/C.md"}
+    # Verify notes actually exist.
+    assert client.get("/api/v1/notes/Batch/A.md").status_code == 200
+    assert client.get("/api/v1/notes/Batch/B.md").status_code == 200
+    assert client.get("/api/v1/notes/Batch/C.md").status_code == 200
+
+
+def test_batch_update_existing(client):
+    client.post("/api/v1/notes", json={"path": "Batch/Upd.md", "content": "old"})
+    r = client.post("/api/v1/notes/batch", json={
+        "operations": [
+            {"action": "update", "path": "Batch/Upd.md", "content": "new content"},
+        ]
+    })
+    assert r.status_code == 200
+    result = r.json()["results"][0]
+    assert result["path"] == "Batch/Upd.md" and result["status"] == "ok"
+    assert "new content" in client.get("/api/v1/notes/Batch/Upd.md").json()["content"]
+
+
+def test_batch_delete(client):
+    client.post("/api/v1/notes", json={"path": "Batch/Del.md", "content": "bye"})
+    r = client.post("/api/v1/notes/batch", json={
+        "operations": [
+            {"action": "delete", "path": "Batch/Del.md"},
+        ]
+    })
+    assert r.status_code == 200
+    assert r.json()["results"][0]["status"] == "ok"
+    assert client.get("/api/v1/notes/Batch/Del.md").status_code == 404
+
+
+def test_batch_mixed_operations(client):
+    client.post("/api/v1/notes", json={"path": "Batch/ToUpdate.md", "content": "old"})
+    client.post("/api/v1/notes", json={"path": "Batch/ToDelete.md", "content": "gone"})
+    r = client.post("/api/v1/notes/batch", json={
+        "operations": [
+            {"action": "create", "path": "Batch/New.md", "content": "fresh"},
+            {"action": "update", "path": "Batch/ToUpdate.md", "content": "new!"},
+            {"action": "delete", "path": "Batch/ToDelete.md"},
+        ]
+    })
+    assert r.status_code == 200
+    results = r.json()["results"]
+    assert len(results) == 3
+    assert all(rr["status"] == "ok" for rr in results)
+    assert client.get("/api/v1/notes/Batch/New.md").status_code == 200
+    assert "new!" in client.get("/api/v1/notes/Batch/ToUpdate.md").json()["content"]
+    assert client.get("/api/v1/notes/Batch/ToDelete.md").status_code == 404
+
+
+def test_batch_create_duplicate_returns_error(client):
+    r = client.post("/api/v1/notes/batch", json={
+        "operations": [
+            {"action": "create", "path": "Batch/Dup.md", "content": "first"},
+            {"action": "create", "path": "Batch/Dup.md", "content": "second"},
+        ]
+    })
+    assert r.status_code == 200
+    results = r.json()["results"]
+    assert results[0]["status"] == "ok"
+    assert results[1]["status"] == "error"
+    assert results[1]["code"] == "already_exists"
+
+
+def test_batch_update_nonexistent_returns_error(client):
+    r = client.post("/api/v1/notes/batch", json={
+        "operations": [
+            {"action": "update", "path": "Nope/Nowhere.md", "content": "x"},
+        ]
+    })
+    assert r.status_code == 200
+    assert r.json()["results"][0]["status"] == "error"
+    assert r.json()["results"][0]["code"] == "not_found"
+
+
+def test_batch_delete_nonexistent_returns_error(client):
+    r = client.post("/api/v1/notes/batch", json={
+        "operations": [
+            {"action": "delete", "path": "Nope/Nowhere.md"},
+        ]
+    })
+    assert r.status_code == 200
+    result = r.json()["results"][0]
+    assert result["status"] == "error"
+    assert result["code"] == "not_found"
+
+
+def test_batch_mixed_ok_and_error(client):
+    client.post("/api/v1/notes", json={"path": "Batch/Exists.md", "content": "here"})
+    r = client.post("/api/v1/notes/batch", json={
+        "operations": [
+            {"action": "create", "path": "Batch/New.md", "content": "ok"},
+            {"action": "create", "path": "Batch/Exists.md", "content": "dupe"},
+            {"action": "delete", "path": "Nope/Ghost.md"},
+            {"action": "update", "path": "Batch/Exists.md", "content": "after"},
+        ]
+    })
+    assert r.status_code == 200
+    results = r.json()["results"]
+    assert results[0] == {"path": "Batch/New.md", "status": "ok", "code": None}
+    assert results[1] == {"path": "Batch/Exists.md", "status": "error", "code": "already_exists"}
+    assert results[2] == {"path": "Nope/Ghost.md", "status": "error", "code": "not_found"}
+    assert results[3] == {"path": "Batch/Exists.md", "status": "ok", "code": None}

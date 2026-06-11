@@ -87,6 +87,7 @@ def _mount_mcp(app: FastAPI, settings: Settings):
         read_only=settings.read_only,
         sync_cycle=lambda **kw: app.state.sync.sync_cycle(**kw),
         get_semantic=lambda: getattr(app.state, "semantic", None),
+        get_events=lambda: getattr(app.state, "events", None),
     )
     mcp.settings.streamable_http_path = "/"  # mounted at /mcp → endpoint is /mcp
     app.mount("/mcp", _BearerASGIMiddleware(mcp.streamable_http_app(), get_settings))

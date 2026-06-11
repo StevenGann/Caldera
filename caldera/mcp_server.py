@@ -70,7 +70,8 @@ def serialize_note(v: NoteView) -> dict[str, Any]:
 
 def build_mcp(get_vault: Callable[[], Vault], *, read_only: bool = False,
               sync_cycle: Callable[..., Any] | None = None,
-              get_semantic: Callable[[], Any] | None = None):
+              get_semantic: Callable[[], Any] | None = None,
+              get_events: Callable[[], Any] | None = None):
     """Construct the FastMCP server bound to the vault provider."""
     from mcp.server.fastmcp import FastMCP
 
@@ -78,9 +79,19 @@ def build_mcp(get_vault: Callable[[], Vault], *, read_only: bool = False,
 
     # ── Read tools ──────────────────────────────────────────────────
     @mcp.tool()
+    async def read_note(path: str) -> dict:
+        """Read a note: returns its full Markdown body, frontmatter (parsed into a
+        dict), tags, outgoing wikilinks with target/resolution info, backlinks
+        (notes that reference this one), and a sha256 checksum for optimistic
+        concurrency control. Use this before editing to get the current state."""
+        try:
+            return serialize_note(get_vault().view(path))
+        except VaultError as exc:
+            raise _wrap(exc)
+
+    @mcp.tool()
     async def get_note(path: str) -> dict:
-        """Get a note with its body, frontmatter, tags, outgoing links, backlinks,
-        and checksum — the note plus its graph context in one call."""
+        """Deprecated alias for read_note, kept for backward compatibility."""
         try:
             return serialize_note(get_vault().view(path))
         except VaultError as exc:
@@ -88,7 +99,9 @@ def build_mcp(get_vault: Callable[[], Vault], *, read_only: bool = False,
 
     @mcp.tool()
     async def get_backlinks(path: str) -> list[dict]:
-        """List notes that link to the given note."""
+        """List notes that link to the given note (reverse links). Useful for
+        understanding which notes reference the current one and finding related
+        content in the graph."""
         try:
             view = get_vault().view(path)
         except VaultError as exc:
@@ -98,7 +111,9 @@ def build_mcp(get_vault: Callable[[], Vault], *, read_only: bool = False,
     @mcp.tool()
     async def list_notes(folder: str | None = None, tag: str | None = None,
                          name_contains: str | None = None, limit: int = 100) -> list[dict]:
-        """List notes (path, name, tags), optionally filtered by folder/tag/name."""
+        """List notes in the vault as lightweight stubs (path, name, tags only).
+        Filter by folder namespace, tag, or a substring in the note name.
+        Use this to discover what notes exist before reading specific ones."""
         vault = get_vault()
         paths = vault.list_notes(folder=folder, tag=tag, q=name_contains)[:limit]
         out = []
@@ -112,8 +127,10 @@ def build_mcp(get_vault: Callable[[], Vault], *, read_only: bool = False,
     async def search_notes(query: str, mode: str = "keyword", tag: str | None = None,
                            folder: str | None = None, threshold: float | None = None,
                            limit: int = 20) -> list[dict]:
-        """Search notes. mode=keyword (fuzzy, default) or semantic (if enabled).
-        Prefer keyword for known titles/phrases, semantic for conceptual queries."""
+        """Search notes by content. mode='keyword' does fuzzy title/text matching
+        (fast, good for known terms). mode='semantic' finds conceptually related
+        notes (if vector embeddings are enabled). Returns path, name, snippet,
+        relevance score, and match type."""
         if mode == "hybrid":
             raise McpToolError("hybrid_unavailable: hybrid search is not implemented")
         vault = get_vault()
@@ -135,12 +152,14 @@ def build_mcp(get_vault: Callable[[], Vault], *, read_only: bool = False,
 
     @mcp.tool()
     async def list_tags() -> dict:
-        """All tags with note counts."""
+        """Return all tags in the vault with the count of notes per tag.
+        Use this to understand the topical landscape of the vault."""
         return get_vault().index.all_tags()
 
     @mcp.tool()
     async def vault_status() -> dict:
-        """Vault & sync status: read_only, dirty, committed_unpushed, state, counts."""
+        """Vault health: read_only mode, dirty (uncommitted changes), counts,
+        sync state, and committed_unpushed count (durability signal)."""
         vault = get_vault()
         s = vault.source.status()
         return {
@@ -153,22 +172,49 @@ def build_mcp(get_vault: Callable[[], Vault], *, read_only: bool = False,
             "tag_count": len(vault.index.tags),
         }
 
+    @mcp.tool()
+    async def get_recent_changes(since: int = 0, limit: int = 50) -> list[dict]:
+        """Return recent vault change events (upserts and deletes) since the given
+        monotonic sequence number. Each event has seq, ts, type, path, and checksum.
+        Use since=0 to get the latest events. Poll with the last returned seq to
+        get only newer changes."""
+        ev = get_events() if get_events is not None else None
+        if ev is None:
+            return []
+        return ev.replay(since, limit=limit)
+
     # ── Write tools (hidden in read-only mode) ──────────────────────
     if not read_only:
         @mcp.tool()
         async def create_note(path: str, content: str = "",
                               frontmatter: dict | None = None) -> dict:
-            """Create a note. Fails if it already exists."""
+            """Create a new note. Fails with 'already_exists' if a note exists at
+            this path. Use create_or_update for upsert (create-or-replace) behavior."""
             try:
                 return serialize_note(await get_vault().create(path, content, frontmatter))
             except VaultError as exc:
                 raise _wrap(exc)
 
         @mcp.tool()
+        async def create_or_update(path: str, content: str,
+                                    frontmatter: dict | None = None,
+                                    expected_checksum: str | None = None) -> dict:
+            """Create or replace a note (upsert). Creates the note if it doesn't
+            exist; replaces it if it does. Pass expected_checksum to avoid
+            clobbering a change made by another agent since you last read the note."""
+            try:
+                return serialize_note(
+                    await get_vault().replace(path, content, frontmatter, expected_checksum)
+                )
+            except VaultError as exc:
+                raise _wrap(exc)
+
+        @mcp.tool()
         async def update_note(path: str, content: str, frontmatter: dict | None = None,
                               expected_checksum: str | None = None) -> dict:
-            """Replace a note's content (create-or-replace). Pass expected_checksum
-            to avoid clobbering a concurrent change."""
+            """Replace a note's content (create-or-replace). Prefer create_or_update
+            for new work; this alias remains for backward compatibility. Pass
+            expected_checksum to avoid clobbering a concurrent change."""
             try:
                 return serialize_note(
                     await get_vault().replace(path, content, frontmatter, expected_checksum)
@@ -181,8 +227,10 @@ def build_mcp(get_vault: Callable[[], Vault], *, read_only: bool = False,
                              frontmatter_merge: dict | None = None,
                              frontmatter_delete: list[str] | None = None,
                              expected_checksum: str | None = None) -> dict:
-            """Partial update: append to the body and/or merge/delete frontmatter
-            keys without rewriting the note."""
+            """Partial update: append text to the note body and/or merge/delete
+            frontmatter keys without rewriting the entire note. Use frontmatter_merge
+            to add or update metadata keys, frontmatter_delete to remove them.
+            Pass expected_checksum to avoid clobbering a concurrent change."""
             try:
                 return serialize_note(await get_vault().patch(
                     path, content_append=content_append, fm_merge=frontmatter_merge,
@@ -193,7 +241,8 @@ def build_mcp(get_vault: Callable[[], Vault], *, read_only: bool = False,
 
         @mcp.tool()
         async def move_note(path: str, to: str, update_links: bool = True) -> dict:
-            """Move/rename a note, optionally rewriting referring wikilinks."""
+            """Move/rename a note to a new path. Set update_links=True (default) to
+            automatically rewrite wikilinks in other notes that point to the old path."""
             try:
                 return serialize_note(await get_vault().move(path, to, update_links=update_links))
             except VaultError as exc:
@@ -201,7 +250,7 @@ def build_mcp(get_vault: Callable[[], Vault], *, read_only: bool = False,
 
         @mcp.tool()
         async def delete_note(path: str) -> dict:
-            """Delete a note."""
+            """Delete a note permanently. Returns the deleted path on success."""
             try:
                 await get_vault().delete(path)
             except VaultError as exc:

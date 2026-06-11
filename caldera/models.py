@@ -85,6 +85,27 @@ class MoveNote(BaseModel):
     )
 
 
+class BatchOperation(BaseModel):
+    action: Literal["create", "update", "delete"]
+    path: str = Field(..., description="Vault-relative note path.")
+    content: str = ""
+    frontmatter: dict[str, Any] | None = None
+
+
+class BatchResult(BaseModel):
+    path: str
+    status: Literal["ok", "error"]
+    code: str | None = Field(None, description="Error code, e.g. not_found, already_exists.")
+
+
+class BatchRequest(BaseModel):
+    operations: list[BatchOperation] = Field(..., min_length=1)
+
+
+class BatchResponse(BaseModel):
+    results: list[BatchResult]
+
+
 # ─── Vault / sync ──────────────────────────────────────────────────────
 class VaultStatus(BaseModel):
     source: str

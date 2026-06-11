@@ -7,8 +7,13 @@ from fastapi.responses import PlainTextResponse
 
 from ..core.vault import Vault
 from ..dependencies import get_vault, require_api_key
+from ..core import vault as vault_core
 from ..models import (
     Backlink,
+    BatchOperation,
+    BatchRequest,
+    BatchResponse,
+    BatchResult,
     CreateNote,
     Link,
     MoveNote,
@@ -165,3 +170,35 @@ async def move_note(path: str, body: MoveNote, vault: Vault = Depends(get_vault)
     wikilinks across the vault."""
     view = await vault.move(path, body.to, update_links=body.update_links)
     return note_view_to_model(view)
+
+
+_BATCH_ERROR_CODE: dict[type[vault_core.VaultError], str] = {
+    vault_core.NoteNotFound: "not_found",
+    vault_core.NoteExists: "already_exists",
+    vault_core.ChecksumMismatch: "checksum_mismatch",
+    vault_core.PreconditionFailed: "precondition_failed",
+    vault_core.NoteCollision: "collision_shadowed",
+    vault_core.NoteTooLarge: "note_too_large",
+    vault_core.ReadOnly: "read_only",
+    vault_core.InvalidPath: "invalid_path",
+}
+
+
+@router.post("/notes/batch", response_model=BatchResponse)
+async def batch_notes(body: BatchRequest, vault: Vault = Depends(get_vault)) -> BatchResponse:
+    """Process multiple note operations in one call. Each operation returns
+    a per-path result with status and optional error code."""
+    results: list[BatchResult] = []
+    for op in body.operations:
+        try:
+            if op.action == "create":
+                await vault.create(op.path, op.content, op.frontmatter)
+            elif op.action == "update":
+                await vault.replace(op.path, op.content, op.frontmatter, None, upsert=False)
+            elif op.action == "delete":
+                await vault.delete(op.path)
+            results.append(BatchResult(path=op.path, status="ok"))
+        except vault_core.VaultError as exc:
+            code = _BATCH_ERROR_CODE.get(type(exc), "error")
+            results.append(BatchResult(path=op.path, status="error", code=code))
+    return BatchResponse(results=results)
