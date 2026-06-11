@@ -137,7 +137,7 @@ class Vault:
         file under case/Unicode folding (DESIGN §3 point 4)."""
         target_fold = fold_key(rel)
         for other in self.root.rglob("*.md"):
-            if ".git" in other.parts:
+            if ".git" in other.parts or ".obsidian" in other.parts:
                 continue
             other_rel = other.relative_to(self.root).as_posix()
             if other_rel != rel and fold_key(other_rel) == target_fold:
@@ -152,7 +152,7 @@ class Vault:
         readers always see one complete index, never a half-rebuilt one."""
         parsed = {}
         for path in self.root.rglob("*.md"):
-            if ".git" in path.parts:
+            if ".git" in path.parts or ".obsidian" in path.parts:
                 continue
             rel = path.relative_to(self.root).as_posix()
             try:

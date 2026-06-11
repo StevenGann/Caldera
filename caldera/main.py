@@ -225,6 +225,15 @@ async def lifespan(app: FastAPI):
     async def _bootstrap() -> None:
         try:
             await source.ensure_ready()
+            # The git working tree (where .git lives) is not always the Obsidian
+            # vault root — the vault may sit in a subdirectory. Re-root the Vault
+            # at the real root (.obsidian marker / caldera.json) so served note
+            # paths aren't prefixed with the subdir name, which would make a sync
+            # client nest the vault inside itself (DESIGN: vault-root detection).
+            from .core.layout import resolve_vault_root
+
+            vault.root = resolve_vault_root(settings.vault_path)
+            logger.info("indexing vault root: %s", vault.root)
             await asyncio.to_thread(vault.reindex)
             if not settings.read_only:
                 await asyncio.to_thread(vault.recover_journal)  # finish interrupted move (M4)
