@@ -189,13 +189,34 @@ async def lifespan(app: FastAPI):
 
     notifier = None
     if settings.webhook_url:
-        from .webhook import WebhookNotifier
+        from .webhook import MultiWebhookNotifier, WebhookNotifier
 
-        notifier = WebhookNotifier(
-            settings.webhook_url, secret=settings.webhook_secret,
-            timeout=settings.webhook_timeout,
-        )
-        logger.info("webhook enabled → %s", settings.webhook_url)
+        # Build target list: [url, secret] pairs
+        targets: list[tuple[str, str | None]] = [
+            (settings.webhook_url, settings.webhook_secret),
+        ]
+
+        # Second webhook target (e.g. Jeeves agent) — optional
+        if settings.webhook_targets:
+            import json as _json
+            try:
+                extra = _json.loads(settings.webhook_targets)
+                if isinstance(extra, list):
+                    targets.extend(extra)
+            except _json.JSONDecodeError:
+                logger.error("CALDERA_WEBHOOK_TARGETS is not valid JSON; skipping extra targets")
+
+        if len(targets) == 1:
+            notifier = WebhookNotifier(
+                targets[0][0], secret=targets[0][1],
+                timeout=settings.webhook_timeout,
+            )
+        else:
+            notifier = MultiWebhookNotifier(
+                targets, timeout=settings.webhook_timeout,
+            )
+        logger.info("webhook enabled → %d target(s): %s",
+                    len(targets), [t[0] for t in targets])
 
     def _on_external_change(change: dict) -> None:
         # An external pull changed the vault. Log it (also covers m5 detection),

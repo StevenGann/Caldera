@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     # ── Webhook (notify on external vault changes) ──────────────────
     webhook_url: str | None = None  # POST a vault.updated event here on external change
     webhook_secret: str | None = None  # HMAC-SHA256 signing key (X-Caldera-Signature)
+    webhook_targets: str | None = None  # JSON array of extra [url, secret] pairs (multi-agent fan-out)
     webhook_timeout: float = 10.0
 
     # ── Real-time change stream (SSE /events, poll /changes) ────────

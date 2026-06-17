@@ -63,6 +63,27 @@ def sign(body: bytes, secret: str) -> str:
     return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 
 
+class MultiWebhookNotifier:
+    """Fan-out notifier that delivers to multiple webhook targets.
+
+    Each target is a ``(url, secret)`` tuple. Delivery is fire-and-forget to all
+    targets — a slow target does not block the others. Configured via
+    ``CALDERA_WEBHOOK_TARGETS`` (JSON array of ``[url, secret]`` pairs).
+    """
+
+    def __init__(self, targets: list[tuple[str, str | None]], *,
+                 timeout: float = 10.0, retries: int = 3) -> None:
+        self.notifiers: list[WebhookNotifier] = [
+            WebhookNotifier(url, secret=secret, timeout=timeout, retries=retries)
+            for url, secret in targets
+        ]
+
+    def notify(self, change: dict[str, list[str]], *, source: str = "external") -> None:
+        """Fire-and-forget to every configured target."""
+        for n in self.notifiers:
+            n.notify(change, source=source)
+
+
 class WebhookNotifier:
     def __init__(self, url: str, *, secret: str | None = None, timeout: float = 10.0,
                  retries: int = 3) -> None:
