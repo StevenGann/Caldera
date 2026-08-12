@@ -177,6 +177,14 @@ class GitSource(Source):
         behind, ahead = self._counts()
 
         if behind == 0:
+            # A successful fetch means any prior fetch-failure label is stale —
+            # reset it so one transient fetch failure can't wedge `state` at
+            # "error" forever (this early-return path previously never reset it).
+            # push_wedged/conflict_blocked are owned by the push/divergence paths
+            # and are re-derived or set elsewhere, so leave them alone.
+            if self._status.state == "error":
+                self._status.state = "idle"
+                self._status.last_error = None
             return ReconcileResult()  # up to date or only local-ahead (push handles it)
         if ahead == 0:
             self.repo.git.merge("--ff-only", remote_ref)

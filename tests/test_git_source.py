@@ -45,6 +45,30 @@ async def test_reconcile_fast_forwards_external_commit(tmp_path, git_origin, pus
     assert (src.root / "New.md").exists()
 
 
+async def test_reconcile_up_to_date_clears_transient_fetch_error(tmp_path, git_origin):
+    """A successful up-to-date reconcile clears a transient fetch-failure
+    ``state="error"`` label (regression: the behind==0 early-return never reset
+    it, so one transient cert/network fetch failure wedged the field forever)."""
+    src = await _ready(tmp_path, git_origin)
+    src._status.state = "error"
+    src._status.last_error = "fetch failed: certificate signer not trusted"
+    res = await src.reconcile()
+    assert not res.error and not res.pulled
+    assert src._status.state == "idle"
+    assert src._status.last_error is None
+
+
+async def test_reconcile_up_to_date_preserves_push_wedged(tmp_path, git_origin):
+    """Clearing the fetch-error label must not mask a push wedge (owned by the
+    push channel and re-derived from the failure counter, not the state field)."""
+    src = await _ready(tmp_path, git_origin)
+    src._status.state = "push_wedged"
+    src._status.last_error = "push_non_fast_forward: ! [rejected]"
+    await src.reconcile()
+    assert src._status.state == "push_wedged"
+    assert src._status.last_error is not None
+
+
 async def test_reconcile_clean_merge_on_disjoint_files(tmp_path, git_origin, push_to_origin):
     src = await _ready(tmp_path, git_origin)
     (src.root / "Local.md").write_text("local\n", encoding="utf-8")
