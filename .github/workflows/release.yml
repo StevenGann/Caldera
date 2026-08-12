@@ -57,5 +57,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # No-cache: gha layer cache has been observed serving a stale image when
+          # only pyproject.toml changes (mcp 2.0.0 incident 2026-08-12). Force a
+          # clean build so dependency pins are always re-resolved.
+          no-cache: true
