@@ -7,6 +7,7 @@ Pure and dependency-free so it is trivially unit-testable. See DESIGN §3
 from __future__ import annotations
 
 import os
+import re
 import unicodedata
 from pathlib import Path, PurePosixPath
 
@@ -40,6 +41,77 @@ def fold_key(rel: str) -> str:
     though a case-sensitive Linux FS can hold both on disk (DESIGN §3 point 2).
     """
     return normalize_key(rel).casefold()
+
+
+# ─── Cross-platform filename policy ────────────────────────────────────
+#
+# The vault is edited by Windows and macOS clients, and by Obsidian's own vault
+# API, all of which reject or mangle characters that Linux accepts happily.
+# Rather than enumerate what each platform forbids — an allowlist is the one
+# that stays correct — Caldera keeps a single conservative rule: a path
+# component may contain only letters, digits, whitespace, hyphen and
+# underscore. Everything else is punctuation and is removed.
+#
+# Hyphen and underscore survive on purpose: they *join* words, and stripping
+# them turns "fast-fashion" into "fastfashion" and "12-Bay" into "12Bay".
+# Characters are removed rather than replaced with spaces so a caller can
+# predict the result without knowing what was removed.
+#
+# Directories keep a leading "." so ".obsidian" (and any other dot-directory)
+# is not renamed out from under the tooling that owns it.
+
+_ALLOWED_PUNCTUATION = frozenset("-_")
+_FALLBACK_STEM = "Untitled"
+
+
+def sanitize_component(name: str, *, keep_leading_dot: bool = False) -> str:
+    """Strip punctuation from one path component (``name`` contains no ``/``).
+
+    Whitespace is collapsed to single spaces and trimmed, so removing a
+    character can never leave a double space behind.
+    """
+    lead = ""
+    body = name
+    if keep_leading_dot and body.startswith("."):
+        lead = "."
+        body = body.lstrip(".")
+    kept = [
+        ch
+        for ch in body
+        if ch.isalnum() or ch.isspace() or ch in _ALLOWED_PUNCTUATION
+    ]
+    cleaned = re.sub(r"\s+", " ", "".join(kept)).strip()
+    if not cleaned:
+        return _FALLBACK_STEM if not lead else lead
+    return lead + cleaned
+
+
+def sanitize_rel_path(rel: str) -> str:
+    """Return ``rel`` with punctuation removed from every path component.
+
+    The trailing ``.md`` is preserved; nothing else about the suffix rules
+    changes, so a clean input is returned byte-identical and callers can
+    detect a rewrite with a plain string comparison.
+    """
+    rel = unicodedata.normalize("NFC", rel).lstrip("/")
+    if not rel:
+        raise PathError("empty path")
+    if not rel.endswith(".md"):
+        rel += ".md"
+    pure = PurePosixPath(rel)
+    if any(part == ".." for part in pure.parts):
+        raise PathError(f"path escapes vault root: {rel}")
+
+    parts = pure.parts
+    out: list[str] = []
+    for index, part in enumerate(parts):
+        is_file = index == len(parts) - 1
+        if is_file:
+            stem = part[:-3] if part.endswith(".md") else part
+            out.append(sanitize_component(stem) + ".md")
+        else:
+            out.append(sanitize_component(part, keep_leading_dot=True))
+    return "/".join(out)
 
 
 def safe_abs(root: Path, rel: str) -> Path:

@@ -16,6 +16,50 @@ async def _vault(tmp_path):
     return Vault(root, src, data_path=str(tmp_path / "data"))
 
 
+# ─── Cross-platform filename policy (writes normalize, reads stay exact) ──
+async def test_create_normalizes_an_illegal_name(tmp_path, caplog):
+    vault = await _vault(tmp_path)
+    with caplog.at_level(logging.INFO):
+        view = await vault.create("Bad: Name?.md", "# hi\n", None)
+    assert view.path == "Bad Name.md"
+    assert (vault.root / "Bad Name.md").exists()
+    assert not (vault.root / "Bad: Name?.md").exists()
+    # The rewrite must be announced, never silent.
+    assert any("normalized for cross-platform safety" in r.message for r in caplog.records)
+
+
+async def test_replace_upsert_normalizes(tmp_path):
+    vault = await _vault(tmp_path)
+    view = await vault.replace("Fresh: Note?.md", "body\n", None, None)
+    assert view.path == "Fresh Note.md"
+    assert (vault.root / "Fresh Note.md").exists()
+
+
+async def test_move_normalizes_its_destination(tmp_path):
+    vault = await _vault(tmp_path)
+    (vault.root / "Old.md").write_text("# Old\n", encoding="utf-8")
+    vault.reindex()
+    view = await vault.move("Old.md", "New: Name?.md")
+    assert view.path == "New Name.md"
+    assert (vault.root / "New Name.md").exists()
+    assert not (vault.root / "Old.md").exists()
+
+
+async def test_a_clean_name_passes_through_untouched(tmp_path):
+    vault = await _vault(tmp_path)
+    view = await vault.create("People/Friends/Matt.md", "hi\n", None)
+    assert view.path == "People/Friends/Matt.md"
+
+
+async def test_reads_stay_exact_so_legacy_names_remain_reachable(tmp_path):
+    # A file that predates the policy is still addressable by its real name;
+    # only writes are normalized, so nothing becomes unreachable mid-rollout.
+    vault = await _vault(tmp_path)
+    (vault.root / "Legacy: Name.md").write_text("# legacy\n", encoding="utf-8")
+    vault.reindex()
+    assert vault.view("Legacy: Name.md").path == "Legacy: Name.md"
+
+
 async def test_move_clears_journal_on_success(tmp_path):
     vault = await _vault(tmp_path)
     (vault.root / "Old.md").write_text("# Old\n", encoding="utf-8")

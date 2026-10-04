@@ -190,13 +190,19 @@ async def batch_notes(body: BatchRequest, vault: Vault = Depends(get_vault)) -> 
     results: list[BatchResult] = []
     for op in body.operations:
         try:
+            # Report the path the vault *actually* stored. A write target is
+            # punctuation-normalized, so the caller has to be told the new name
+            # rather than be left believing its own spelling was accepted.
+            effective = op.path
             if op.action == "create":
-                await vault.create(op.path, op.content, op.frontmatter)
+                effective = (await vault.create(op.path, op.content, op.frontmatter)).path
             elif op.action == "update":
-                await vault.replace(op.path, op.content, op.frontmatter, None, upsert=False)
+                effective = (
+                    await vault.replace(op.path, op.content, op.frontmatter, None, upsert=False)
+                ).path
             elif op.action == "delete":
                 await vault.delete(op.path)
-            results.append(BatchResult(path=op.path, status="ok"))
+            results.append(BatchResult(path=effective, status="ok"))
         except vault_core.VaultError as exc:
             code = _BATCH_ERROR_CODE.get(type(exc), "error")
             results.append(BatchResult(path=op.path, status="error", code=code))

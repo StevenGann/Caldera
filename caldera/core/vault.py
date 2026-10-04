@@ -24,7 +24,7 @@ import yaml
 from ..sources.base import Source
 from .index import Backlink, ResolvedLink, VaultIndex
 from .parser import parse_note
-from .paths import PathError, atomic_write, fold_key, normalize_key, safe_abs
+from .paths import PathError, atomic_write, fold_key, normalize_key, safe_abs, sanitize_rel_path
 
 logger = logging.getLogger("caldera.vault")
 
@@ -125,6 +125,26 @@ class Vault:
             return normalize_key(rel)
         except PathError as exc:
             raise InvalidPath(str(exc)) from exc
+
+    def _norm_write(self, rel: str) -> str:
+        """Canonical key for a **write target**, with punctuation removed.
+
+        Reads deliberately stay exact so any existing file — including one that
+        predates the policy — remains addressable by its real name. Writes go
+        through here so the vault can never *gain* a name that a Windows or
+        macOS client, or Obsidian's own vault API, would reject. A rewrite is
+        logged so it is never silent.
+        """
+        try:
+            original = normalize_key(rel)
+            cleaned = sanitize_rel_path(rel)
+        except PathError as exc:
+            raise InvalidPath(str(exc)) from exc
+        if cleaned != original:
+            logger.info(
+                "path normalized for cross-platform safety: %r -> %r", original, cleaned
+            )
+        return cleaned
 
     def _guard_size(self, raw: str) -> None:
         if len(raw.encode("utf-8")) > self.max_note_bytes:
@@ -255,7 +275,7 @@ class Vault:
 
     async def create(self, path: str, content: str, fm: dict[str, Any] | None) -> NoteView:
         self._guard_write()
-        rel = self._norm(path)
+        rel = self._norm_write(path)
         raw = self._compose(content, fm)
         self._guard_size(raw)
         async with self._lock:
@@ -273,7 +293,7 @@ class Vault:
                        expected: str | None, *, etag: str | None = None,
                        upsert: bool = True) -> NoteView:
         self._guard_write()
-        rel = self._norm(path)
+        rel = self._norm_write(path)
         raw = self._compose(content, fm)
         self._guard_size(raw)
         async with self._lock:
@@ -339,7 +359,7 @@ class Vault:
             if entry is None:
                 raise NoteNotFound(path)
             src = entry.path
-            dst = self._norm(to)
+            dst = self._norm_write(to)
             dst_abs = self._abs(dst)
             if dst_abs.exists():
                 raise NoteExists(dst)
