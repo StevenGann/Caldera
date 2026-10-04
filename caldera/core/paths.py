@@ -107,7 +107,7 @@ def sanitize_rel_path(rel: str) -> str:
     for index, part in enumerate(parts):
         is_file = index == len(parts) - 1
         if is_file:
-            stem = part[:-3] if part.endswith(".md") else part
+            stem = part.removesuffix(".md")
             out.append(sanitize_component(stem) + ".md")
         else:
             out.append(sanitize_component(part, keep_leading_dot=True))
